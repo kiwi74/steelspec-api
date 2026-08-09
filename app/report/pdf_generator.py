@@ -109,51 +109,47 @@ def _draw_cover(canvas_obj, project: dict):
     w, h = A4
     canvas_obj.saveState()
 
-    # Full dark background block
-    block_top = h - 15 * mm
-    block_bottom = h - 175 * mm
-    canvas_obj.setFillColor(DARK_NAVY)
-    canvas_obj.rect(15 * mm, block_bottom, w - 30 * mm, block_top - block_bottom, fill=1, stroke=0)
+    # White background throughout — this whole function draws on the default page canvas
+    canvas_obj.setFillColor(white)
+    canvas_obj.rect(0, 0, w, h, fill=1, stroke=0)
 
-    # Subtle engineering grid texture (faint rust lines)
-    canvas_obj.saveState()
-    canvas_obj.setStrokeColor(HexColor("#2a2a2a"))
-    canvas_obj.setLineWidth(0.3)
-    x = 15 * mm
-    while x < w - 15 * mm:
-        canvas_obj.line(x, block_bottom, x, block_top)
-        x += 12 * mm
-    canvas_obj.restoreState()
-
-    # Logo mark (rounded square with S)
-    logo_x, logo_y = 25 * mm, block_top - 22 * mm
+    # Letterhead: logo mark top-left, small report label top-right
+    logo_x, logo_y = MARGIN, h - 28 * mm
     canvas_obj.setFillColor(RUST)
     canvas_obj.roundRect(logo_x, logo_y, 9 * mm, 9 * mm, 2 * mm, fill=1, stroke=0)
     canvas_obj.setFillColor(white)
     canvas_obj.setFont("Helvetica-Bold", 14)
     canvas_obj.drawCentredString(logo_x + 4.5 * mm, logo_y + 2.6 * mm, "S")
 
-    canvas_obj.setFillColor(RUST)
+    canvas_obj.setFillColor(INK)
     canvas_obj.setFont("Helvetica-Bold", 11)
     canvas_obj.drawString(logo_x + 13 * mm, logo_y + 3 * mm, "STEELSPEC")
 
-    # Eyebrow label
-    canvas_obj.setFillColor(RUST_LIGHT)
-    canvas_obj.setFont("Helvetica-Bold", 8.5)
-    eyebrow_y = block_top - 42 * mm
-    canvas_obj.drawString(25 * mm, eyebrow_y, "— STRUCTURAL STEEL TAKEOFF")
+    canvas_obj.setFillColor(GREY)
+    canvas_obj.setFont("Helvetica", 8)
+    canvas_obj.drawRightString(w - MARGIN, logo_y + 3 * mm, "STRUCTURAL STEEL TAKEOFF REPORT")
 
-    # Project name (wrap manually if long)
+    canvas_obj.setStrokeColor(BORDER)
+    canvas_obj.setLineWidth(0.5)
+    canvas_obj.line(MARGIN, logo_y - 8 * mm, w - MARGIN, logo_y - 8 * mm)
+
+    # Eyebrow label
+    canvas_obj.setFillColor(RUST)
+    canvas_obj.setFont("Helvetica-Bold", 9)
+    eyebrow_y = h - 65 * mm
+    canvas_obj.drawString(MARGIN, eyebrow_y, "— STRUCTURAL STEEL TAKEOFF")
+
+    # Project name (large, dark, presentation-style — wraps to 2 lines max)
     name = project.get("name") or "Steel Takeoff Report"
-    canvas_obj.setFillColor(white)
-    canvas_obj.setFont("Helvetica-Bold", 26)
-    max_width = w - 50 * mm
-    title_y = block_top - 58 * mm
+    canvas_obj.setFillColor(INK)
+    canvas_obj.setFont("Helvetica-Bold", 30)
+    max_width = w - 2 * MARGIN
+    title_y = eyebrow_y - 16 * mm
     words = name.split()
     lines, current = [], ""
     for word in words:
         trial = f"{current} {word}".strip()
-        if canvas_obj.stringWidth(trial, "Helvetica-Bold", 26) > max_width and current:
+        if canvas_obj.stringWidth(trial, "Helvetica-Bold", 30) > max_width and current:
             lines.append(current)
             current = word
         else:
@@ -161,14 +157,20 @@ def _draw_cover(canvas_obj, project: dict):
     if current:
         lines.append(current)
     for i, line in enumerate(lines[:2]):
-        canvas_obj.drawString(25 * mm, title_y - i * 11 * mm, line)
+        canvas_obj.drawString(MARGIN, title_y - i * 12 * mm, line)
 
-    subtitle_y = title_y - (len(lines[:2])) * 11 * mm - 6 * mm
-    canvas_obj.setFillColor(HexColor("#c4a084"))
-    canvas_obj.setFont("Helvetica", 11)
-    canvas_obj.drawString(25 * mm, subtitle_y, "Structural Steel Schedule & Connection Report")
+    subtitle_y = title_y - (len(lines[:2])) * 12 * mm - 8 * mm
+    canvas_obj.setFillColor(GREY)
+    canvas_obj.setFont("Helvetica", 12)
+    canvas_obj.drawString(MARGIN, subtitle_y, "Structural Steel Schedule & Connection Report")
 
-    # Detail lines
+    # Thin rust divider
+    divider_y = subtitle_y - 10 * mm
+    canvas_obj.setStrokeColor(RUST)
+    canvas_obj.setLineWidth(1.5)
+    canvas_obj.line(MARGIN, divider_y, MARGIN + 30 * mm, divider_y)
+
+    # Project detail rows — generous fixed spacing, no Paragraph/Table involved
     details = [
         ("Client", project.get("client")),
         ("Structural Engineer", project.get("structural_engineer")),
@@ -176,28 +178,47 @@ def _draw_cover(canvas_obj, project: dict):
         ("Source File", project.get("source_file")),
         ("Date Generated", datetime.now().strftime("%d %B %Y")),
     ]
-    detail_y = subtitle_y - 14 * mm
-    canvas_obj.setFont("Helvetica", 9.5)
+    detail_y = divider_y - 14 * mm
     for label, value in details:
         if not value:
             continue
-        canvas_obj.setFillColor(HexColor("#8a8378"))
-        canvas_obj.drawString(25 * mm, detail_y, f"{label}")
-        canvas_obj.setFillColor(white)
-        canvas_obj.drawString(25 * mm + 42 * mm, detail_y, str(value))
-        detail_y -= 6.5 * mm
+        canvas_obj.setFillColor(GREY)
+        canvas_obj.setFont("Helvetica", 9.5)
+        canvas_obj.drawString(MARGIN, detail_y, label)
+        canvas_obj.setFillColor(INK)
+        canvas_obj.setFont("Helvetica-Bold", 10.5)
+        canvas_obj.drawString(MARGIN + 44 * mm, detail_y, str(value))
+        detail_y -= 8 * mm
 
     canvas_obj.restoreState()
 
-    # Disclaimer box below the dark block
+    # === Contact / brand footer strip ===
     canvas_obj.saveState()
-    disc_top = block_bottom - 8 * mm
-    disc_height = 26 * mm
+    footer_top = 52 * mm
     canvas_obj.setFillColor(BG)
-    canvas_obj.rect(15 * mm, disc_top - disc_height, w - 30 * mm, disc_height, fill=1, stroke=0)
+    canvas_obj.rect(0, 0, w, footer_top, fill=1, stroke=0)
+    canvas_obj.setStrokeColor(BORDER)
+    canvas_obj.setLineWidth(0.5)
+    canvas_obj.line(0, footer_top, w, footer_top)
+
+    contact_y = footer_top - 12 * mm
+    canvas_obj.setFillColor(RUST)
+    canvas_obj.setFont("Helvetica-Bold", 9)
+    canvas_obj.drawString(MARGIN, contact_y, "STEELSPEC")
+    canvas_obj.setFillColor(GREY)
+    canvas_obj.setFont("Helvetica", 8.5)
+    contact_line = "steelspec.co.nz    \u2022    hello@steelspec.co.nz    \u2022    +64 9 123 4567"
+    canvas_obj.drawString(MARGIN + 24 * mm, contact_y, contact_line)
+    canvas_obj.drawRightString(w - MARGIN, contact_y, "Made in Aotearoa")
+
+    # Disclaimer box
+    disc_top = footer_top - 20 * mm
+    disc_height = 24 * mm
+    canvas_obj.setFillColor(white)
+    canvas_obj.rect(MARGIN, disc_top - disc_height, w - 2 * MARGIN, disc_height, fill=1, stroke=0)
     canvas_obj.setStrokeColor(RUST)
     canvas_obj.setLineWidth(1.5)
-    canvas_obj.line(15 * mm, disc_top - disc_height, 15 * mm, disc_top)
+    canvas_obj.line(MARGIN, disc_top - disc_height, MARGIN, disc_top)
 
     text = (
         "IMPORTANT: This report is an automated extraction of structural steel data from the "
@@ -208,7 +229,7 @@ def _draw_cover(canvas_obj, project: dict):
     )
     canvas_obj.setFillColor(INK2)
     canvas_obj.setFont("Helvetica", 7.5)
-    _wrap_text_canvas(canvas_obj, text, 20 * mm, disc_top - 6 * mm, w - 45 * mm, 7.5, "Helvetica", 10)
+    _wrap_text_canvas(canvas_obj, text, MARGIN + 5 * mm, disc_top - 6 * mm, w - 2 * MARGIN - 10 * mm, 7.5, "Helvetica", 10)
     canvas_obj.restoreState()
 
 
@@ -284,13 +305,18 @@ def _styled_table(data, col_widths, has_totals_row=False):
 
 
 def _metric_card(value: str, label: str, styles, accent=RUST):
-    combined = Paragraph(
-        f'<font size="22" color="{_hex(INK)}"><b>{value}</b></font>'
-        f'<br/><br/>'
-        f'<font size="7.5" color="{_hex(GREY)}">{label.upper()}</font>',
-        ParagraphStyle("MetricCombined", fontName="Helvetica", alignment=TA_CENTER, leading=26),
+    value_p = Paragraph(
+        f'<font color="{_hex(INK)}"><b>{value}</b></font>',
+        ParagraphStyle("MetricValue", fontName="Helvetica-Bold", fontSize=22,
+                       leading=26, alignment=TA_CENTER),
     )
-    inner = Table([[combined]], colWidths=[38 * mm])
+    label_p = Paragraph(
+        f'<font color="{_hex(GREY)}">{label.upper()}</font>',
+        ParagraphStyle("MetricLabel", fontName="Helvetica", fontSize=7.5,
+                       leading=10, alignment=TA_CENTER),
+    )
+    content = [value_p, Spacer(1, 3 * mm), label_p]
+    inner = Table([[content]], colWidths=[38 * mm])
     inner.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("TOPPADDING", (0, 0), (-1, -1), 8),
@@ -301,11 +327,25 @@ def _metric_card(value: str, label: str, styles, accent=RUST):
     return inner
 
 
-def _confidence_pill(confidence: str, styles):
-    fg, bg = CONFIDENCE_COLORS.get((confidence or "high").lower(), CONFIDENCE_COLORS["high"])
+def _status_pill(confidence: str, styles):
+    """
+    Rather than surfacing internal extraction-confidence tiers directly
+    (which reads as "this might be wrong" even when it's working
+    correctly), show a positive "Matched" status for anything the
+    system successfully extracted, and reserve a distinct flag only
+    for rows that genuinely need a human look — low-confidence or
+    manually-flagged matches.
+    """
+    needs_review = (confidence or "").lower() in ("low", "manual")
+    if needs_review:
+        return Paragraph(
+            f'<font color="{_hex(AMBER)}"><b>&#9679;</b></font> '
+            f'<font color="{_hex(AMBER)}">Verify</font>',
+            styles["CellText"],
+        )
     return Paragraph(
-        f'<font color="{_hex(fg)}"><b>&#9679;</b></font> '
-        f'<font color="{_hex(fg)}">{(confidence or "High").title()}</font>',
+        f'<font color="{_hex(GREEN)}"><b>&#10003;</b></font> '
+        f'<font color="{_hex(GREEN)}">Matched</font>',
         styles["CellText"],
     )
 
@@ -375,7 +415,7 @@ def generate_report_pdf(project_id: str) -> bytes:
     ))
 
     header = [Paragraph(h, styles["CellHeader"]) for h in
-              ["Mark", "Section", "Grade", "Length (mm)", "Qty", "kg/m", "Total (kg)", "Confidence"]]
+              ["Mark", "Section", "Grade", "Length (mm)", "Qty", "kg/m", "Total (kg)", "Status"]]
     data = [header]
     for m in members:
         w = float(m.get("total_weight_kg") or 0)
@@ -387,7 +427,7 @@ def generate_report_pdf(project_id: str) -> bytes:
             Paragraph(str(m.get("quantity") or 1), styles["CellTextMono"]),
             Paragraph(f'{m.get("weight_per_metre"):.1f}' if m.get("weight_per_metre") else "-", styles["CellTextMono"]),
             Paragraph(f"{w:.1f}", styles["CellTextMono"]),
-            _confidence_pill(m.get("confidence"), styles),
+            _status_pill(m.get("confidence"), styles),
         ])
     data.append([
         "", "", "", "", "", "",
