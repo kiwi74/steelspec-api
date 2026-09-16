@@ -5,3 +5,5 @@ supabase==2.10.0
 ezdxf==1.3.4
 reportlab==4.2.5
 pydantic==2.9.2
+anthropic==0.40.0
+pdf2image==1.17.0
