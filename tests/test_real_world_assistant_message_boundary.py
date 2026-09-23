@@ -1,7 +1,7 @@
 """
 Milestone 7B7 — REAL-WORLD EXTERNAL ASSISTANT MESSAGE BOUNDARY PROOF.
 
-Proves the assistant_message_boundary module against the genuine 51-candidate
+Proves the assistant_message_boundary module against the genuine 52-candidate
 Selby workload: the minimal input projection, the untrusted display-only
 response representation, and the structural impossibility of assistant output
 becoming engineering state. No external assistant exists in this milestone —
@@ -88,7 +88,7 @@ BOUNDARY_SOURCE = MODULE_FILE.read_text()
 RP0001_CONFIRM_VALUE = "(('connected_member_marks', ['001', 'PL028']), ('material', '300'))"
 RP0008_HOLE_READING = "((4, '22mm holes', None, ()),)"
 RP0009_HOLE_READING = "((2, '18mm holes', None, ()),)"
-RP0045_PLATE_READING = ("[{'type': 'flange plate', 'thickness_mm': 20, 'width_mm': 180, "
+RP0046_PLATE_READING = ("[{'type': 'flange plate', 'thickness_mm': 20, 'width_mm': 180, "
                         "'depth_mm': 340}, {'type': 'web plate', 'thickness_mm': 10, "
                         "'width_mm': 210, 'depth_mm': 282}]")
 RP0033_MATERIAL_ANCHOR = ("source drawing SELBY-C1136; drawing number 001; "
@@ -149,7 +149,7 @@ ADVERSARIAL_OUTPUTS = [
 ]
 
 # The same list without the deliberately enormous output, for loops that run
-# the stand-in against every one of the 508 real tasks.
+# the stand-in against every one of the 518 real tasks.
 ADVERSARIAL_OUTPUTS_SHORT = [
     (label, text, claims) for label, text, claims in ADVERSARIAL_OUTPUTS
     if len(text) <= 1000
@@ -373,8 +373,8 @@ class TestInputMinimisation:
         assert {f.name for f in request.fields} == {
             "candidate_count", "task_count", "pending_task_count"}
         assert dict((f.name, f.value) for f in request.fields) == {
-            "candidate_count": "51", "task_count": "508",
-            "pending_task_count": "508"}
+            "candidate_count": "52", "task_count": "518",
+            "pending_task_count": "518"}
         assert not any("SELBY" in f.value or "RP-" in f.value
                        for f in request.fields)
 
@@ -398,7 +398,7 @@ class TestInputMinimisation:
         request = build_assistant_request(
             real_assistance, role=ROLE_DESCRIBE_OBSERVATION,
             package_id="RP-0001", task_id=task.task_id)
-        assert not any("RP-0002" in f.value or "RP-0051" in f.value
+        assert not any("RP-0002" in f.value or "RP-0052" in f.value
                        for f in request.fields)
 
     def test_request_holds_only_frozen_plain_data(self, real_assistance):
@@ -439,12 +439,12 @@ class TestObservationPreservation:
         assert "'22mm holes'" in value
 
     def test_plate_observation_verbatim(self, real_assistance):
-        task = _task(real_assistance, "RP-0045", TASK_PROVIDE_PLATE)
+        task = _task(real_assistance, "RP-0046", TASK_PROVIDE_PLATE)
         request = build_assistant_request(
             real_assistance, role=ROLE_DESCRIBE_OBSERVATION,
-            package_id="RP-0045", task_id=task.task_id)
+            package_id="RP-0046", task_id=task.task_id)
         value = next(f.value for f in request.fields if f.name == "current_value")
-        assert value == RP0045_PLATE_READING == task.current_value
+        assert value == RP0046_PLATE_READING == task.current_value
 
     def test_rp0009_hole_observation_verbatim(self, real_assistance):
         task = _task(real_assistance, "RP-0009", TASK_PROVIDE_HOLE_DIAMETER)
@@ -710,7 +710,7 @@ class TestHumanOnlyResolution:
                     assistance, role=ROLE_EXPLAIN_TASK,
                     package_id=candidate.package_id, task_id=task.task_id)
                 parse_assistant_response(request, "prose")
-        assert assistance.pending_task_count == 508
+        assert assistance.pending_task_count == 518
         assert build_project_review_contract(workflow).revision == 0
 
     def test_genuine_path_is_the_only_path_that_changes_state(self, tmp_path):
@@ -726,7 +726,7 @@ class TestHumanOnlyResolution:
         advanced = _resolve_full_rp0009(workflow, tmp_path)
         assert build_project_review_contract(advanced).revision == 1
         assert (tmp_path / RP0009_PDF_NAME).exists()
-        assert _assistance(advanced).pending_task_count == 498
+        assert _assistance(advanced).pending_task_count == 508
 
 
 # =============================================================================
@@ -751,12 +751,12 @@ class TestRealWorldCoverage:
                     if f.name == "current_value") == RP0008_HOLE_READING
 
     def test_assistable_plate_observation(self, real_assistance):
-        task = _task(real_assistance, "RP-0045", TASK_PROVIDE_PLATE)
+        task = _task(real_assistance, "RP-0046", TASK_PROVIDE_PLATE)
         request = build_assistant_request(
             real_assistance, role=ROLE_DESCRIBE_OBSERVATION,
-            package_id="RP-0045", task_id=task.task_id)
+            package_id="RP-0046", task_id=task.task_id)
         assert next(f.value for f in request.fields
-                    if f.name == "current_value") == RP0045_PLATE_READING
+                    if f.name == "current_value") == RP0046_PLATE_READING
 
     def test_missing_material_stays_missing(self, material_assistance, tmp_path):
         task = _task(material_assistance, "RP-0033",
@@ -851,9 +851,9 @@ class TestRealWorldCoverage:
                         real_assistance, role=ROLE_EVIDENCE_NAVIGATION,
                         package_id=candidate.package_id, task_id=task.task_id)
                     counts[ROLE_EVIDENCE_NAVIGATION] += 1
-        assert counts == {ROLE_EXPLAIN_TASK: 508, ROLE_DESCRIBE_OBSERVATION: 72,
-                          ROLE_DRAFT_ACKNOWLEDGMENT: 204,
-                          ROLE_EVIDENCE_NAVIGATION: 79}
+        assert counts == {ROLE_EXPLAIN_TASK: 518, ROLE_DESCRIBE_OBSERVATION: 73,
+                          ROLE_DRAFT_ACKNOWLEDGMENT: 208,
+                          ROLE_EVIDENCE_NAVIGATION: 81}
         assert candidates_touched == set(EXPECTED_IDS)
         assert [c.package_id for c in real_assistance.candidates] == list(EXPECTED_IDS)
 
@@ -1049,9 +1049,9 @@ class TestDeterminism:
 
 class TestRegression:
     def test_workload_baseline_unchanged(self, real_assistance):
-        assert real_assistance.candidate_count == 51
-        assert real_assistance.task_count == 508
-        assert real_assistance.pending_task_count == 508
+        assert real_assistance.candidate_count == 52
+        assert real_assistance.task_count == 518
+        assert real_assistance.pending_task_count == 518
         assert real_assistance.revision == 0
         assert [c.package_id for c in real_assistance.candidates] == list(EXPECTED_IDS)
 
@@ -1081,7 +1081,8 @@ class TestRegression:
             == RP0009_RESOLVED_PROVENANCE
 
     def test_missing_material_candidates_still_missing(self, material_assistance):
-        for package_id in ("RP-0033", "RP-0034", "RP-0038", "RP-0040", "RP-0048"):
+        for package_id in ("RP-0033", "RP-0034", "RP-0038", "RP-0040",
+                           "RP-0041", "RP-0049"):
             task = _task(material_assistance, package_id,
                          TASK_PROVIDE_MATERIAL_SPECIFICATION)
             assert task.current_value is None

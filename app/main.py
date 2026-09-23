@@ -6,6 +6,8 @@ Endpoints:
   POST /extract/{project_id}         — triggers extraction on an uploaded file
   POST /generate-report/{project_id} — (re)generates the PDF report on demand
   GET  /health                       — simple healthcheck
+  /review/...                        — mounted 7AN review UI (internal review
+                                       surface; not production-secure)
 """
 import os
 import tempfile
@@ -18,6 +20,7 @@ from app.drawing_reading.dxf_parser import parse_dxf_and_save
 from app.pipeline import parse_pdf_and_save
 from app.report.pdf_generator import generate_report_pdf
 from app.export.storage_export import upload_and_record
+from app.review_ui.web import review_app
 
 app = FastAPI(title="SteelSpec API")
 
@@ -27,6 +30,13 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# 7AO: mount the proven 7AN review UI under the real application as an
+# internal review surface. The UI stays a pure consumer (7AJ -> 7AK -> 7AM
+# -> pages) and its session layer is a deliberately temporary in-process
+# slice with NO authentication — mounting it here does not make it
+# production-secure public exposure.
+app.mount("/review", review_app)
 
 
 @app.get("/health")

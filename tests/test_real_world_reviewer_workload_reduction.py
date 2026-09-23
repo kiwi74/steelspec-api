@@ -1,6 +1,6 @@
 """MILESTONE 7B5 — Real-World Reviewer Workload Reduction Proof.
 
-Proves, over the genuine 51-candidate Selby Square workload (7B1-7B4), where
+Proves, over the genuine 52-candidate Selby Square workload (7B1-7B4), where
 SteelSpec's human reviewer workload can potentially be reduced — WITHOUT the
 system inventing engineering answers, weakening provenance, bypassing
 validation or making engineering decisions on the reviewer's behalf.
@@ -9,14 +9,14 @@ WHAT THIS FILE PROVES:
   - The five workload categories (ASSISTABLE_CANDIDATE /
     HUMAN_ENGINEERING_DECISION / EVIDENCE_LOOKUP / ADMINISTRATIVE /
     NOT_APPLICABLE) are a deterministic, total classification of the 7AC task
-    vocabulary: 72 / 153 / 79 / 204 / 0 over the real 508 tasks.
+    vocabulary: 73 / 156 / 81 / 208 / 0 over the real 518 tasks.
   - Every ASSISTABLE record carries the existing AI observation VERBATIM and a
     fixed proposal text that proposes no value and performs no conversion
     ('22mm holes' stays '22mm holes'; '300' stays an observation).
   - Every HUMAN record carries the fixed three-part human boundary; no
     observation is attached, and any proposal there is flagged as the system
     making the reviewer's decision.
-  - The 15 mandated negatives A-O, the 51-candidate regression (7B2/7B4
+  - The 15 mandated negatives A-O, the 52-candidate regression (7B2/7B4
     distributions unchanged) and RP-0009's genuine AUTO->GENERATED->VERIFIED
     resolution, all unchanged.
 
@@ -32,7 +32,7 @@ BRIEF ITEM MAP:
   section-8 human boundary ....... TestHumanBoundaryRecords
   section-8 evidence records ..... TestEvidenceLookupRecords
   the 15 mandated negatives ...... TestNegativeProofs7B5
-  51-candidate regression ........ TestRealWorldRegression
+  52-candidate regression ........ TestRealWorldRegression
   determinism / purity ........... TestDeterminismAndPurity
 """
 
@@ -95,23 +95,23 @@ from tests.test_real_world_reviewer_evidence import (
 # ---------------------------------------------------------------------------
 
 CATEGORY_TASK_COUNTS = {
-    CATEGORY_ASSISTABLE: 72,
-    CATEGORY_HUMAN_ENGINEERING_DECISION: 153,
-    CATEGORY_EVIDENCE_LOOKUP: 79,
-    CATEGORY_ADMINISTRATIVE: 204,
+    CATEGORY_ASSISTABLE: 73,
+    CATEGORY_HUMAN_ENGINEERING_DECISION: 156,
+    CATEGORY_EVIDENCE_LOOKUP: 81,
+    CATEGORY_ADMINISTRATIVE: 208,
     CATEGORY_NOT_APPLICABLE: 0,
 }
 CATEGORY_CANDIDATE_COUNTS = {
-    CATEGORY_ASSISTABLE: 51,
-    CATEGORY_HUMAN_ENGINEERING_DECISION: 51,
-    CATEGORY_EVIDENCE_LOOKUP: 48,
-    CATEGORY_ADMINISTRATIVE: 51,
+    CATEGORY_ASSISTABLE: 52,
+    CATEGORY_HUMAN_ENGINEERING_DECISION: 52,
+    CATEGORY_EVIDENCE_LOOKUP: 49,
+    CATEGORY_ADMINISTRATIVE: 52,
     CATEGORY_NOT_APPLICABLE: 0,
 }
 # The three candidates with no EVIDENCE_LOOKUP task at all: RP-0032 has no
 # plate task (its clean AI plate reading confirmed via CONFIRM) and an
-# assistable hole task; RP-0045/0046 have assistable plate AND hole tasks.
-NO_EVIDENCE_LOOKUP_IDS = ("RP-0032", "RP-0045", "RP-0046")
+# assistable hole task; RP-0046/0047 have assistable plate AND hole tasks.
+NO_EVIDENCE_LOOKUP_IDS = ("RP-0032", "RP-0046", "RP-0047")
 EVIDENCE_LOOKUP_IDS = tuple(
     pid for pid in EXPECTED_IDS if pid not in NO_EVIDENCE_LOOKUP_IDS)
 
@@ -120,8 +120,8 @@ TASK_TYPE_ORDER = (
     "PROVIDE_PLATE", "PROVIDE_HOLE_DIAMETER", "PROVIDE_LOCATION",
     "REVIEW_SPECIFICATION", "REVIEW_VALIDATION", "PROVIDE_CONNECTION_IDENTITY",
 )
-TASK_TYPE_COUNTS = {task_type: 51 for task_type in TASK_TYPE_ORDER}
-TASK_TYPE_COUNTS["PROVIDE_PLATE"] = 49  # RP-0032/RP-0033: clean AI plate readings
+TASK_TYPE_COUNTS = {task_type: 52 for task_type in TASK_TYPE_ORDER}
+TASK_TYPE_COUNTS["PROVIDE_PLATE"] = 50  # RP-0032/RP-0033: clean AI plate readings
 
 BLOCKER_ORDER = (
     "AUTOMATION_BLOCKER_REVIEW_STATUS", "AUTOMATION_BLOCKER_PROVENANCE",
@@ -130,15 +130,15 @@ BLOCKER_ORDER = (
     "AUTOMATION_BLOCKER_ATTACHMENT", "AUTOMATION_BLOCKER_SPECIFICATION",
     "AUTOMATION_BLOCKER_VALIDATION",
 )
-BLOCKER_COUNTS = {code: 51 for code in BLOCKER_ORDER}
-BLOCKER_COUNTS["AUTOMATION_BLOCKER_PLATE"] = 49
+BLOCKER_COUNTS = {code: 52 for code in BLOCKER_ORDER}
+BLOCKER_COUNTS["AUTOMATION_BLOCKER_PLATE"] = 50
 
 # The two candidates whose plate task shows an AI plate reading (assistable).
-ASSISTABLE_PLATE_IDS = ("RP-0045", "RP-0046")
+ASSISTABLE_PLATE_IDS = ("RP-0046", "RP-0047")
 
-# 457 of the 508 tasks are blocker-linked (required); the 51 identity tasks
+# 466 of the 518 tasks are blocker-linked (required); the 52 identity tasks
 # are optional. At revision 0 every task is unresolved.
-REQUIRED_TASK_COUNT = 457
+REQUIRED_TASK_COUNT = 466
 
 # The module's fixed proposal texts — verbatim-only; none contains or
 # transforms a value (pinned here so any drift fails the milestone).
@@ -224,18 +224,18 @@ class TestDeterministicClassification:
 
 
 # =============================================================================
-# The real 51-candidate workload totals.
+# The real 52-candidate workload totals.
 # =============================================================================
 
 class TestRealWorkloadBaseline:
-    """Every aggregate reconciles to the genuine 51-candidate workflow."""
+    """Every aggregate reconciles to the genuine 52-candidate workflow."""
 
     def test_totals(self):
         baseline = _baseline()
         assert baseline.project_id == "PROJ-7AV-SELBY"
         assert baseline.revision == 0
-        assert baseline.candidate_count == 51
-        assert baseline.task_count == REAL_TOTAL_TASKS == 508
+        assert baseline.candidate_count == 52
+        assert baseline.task_count == REAL_TOTAL_TASKS == 518
         assert baseline.pending_task_count == REAL_TOTAL_TASKS  # all open at rev 0
 
     def test_category_counts(self):
@@ -246,13 +246,13 @@ class TestRealWorkloadBaseline:
             CATEGORY_CANDIDATE_COUNTS
         assert [c.category for c in baseline.categories] == list(CATEGORIES)
         # The five categories account for every task exactly once.
-        assert sum(c.task_count for c in baseline.categories) == 508
+        assert sum(c.task_count for c in baseline.categories) == 518
 
     def test_evidence_lookup_candidate_ids(self):
         category = next(c for c in _baseline().categories
                         if c.category == CATEGORY_EVIDENCE_LOOKUP)
         assert category.candidate_ids == EVIDENCE_LOOKUP_IDS
-        assert len(category.candidate_ids) == 48
+        assert len(category.candidate_ids) == 49
         for pid in NO_EVIDENCE_LOOKUP_IDS:
             assert pid not in category.candidate_ids
 
@@ -324,7 +324,7 @@ class TestAssistableRecords:
                 if task.category == CATEGORY_ASSISTABLE:
                     by_type[task.task_type] = by_type.get(task.task_type, 0) + 1
         assert by_type == {
-            TASK_CONFIRM_AI_VALUES: 51, TASK_PROVIDE_PLATE: 2,
+            TASK_CONFIRM_AI_VALUES: 52, TASK_PROVIDE_PLATE: 2,
             TASK_PROVIDE_HOLE_DIAMETER: 19,
         }
 
@@ -369,7 +369,7 @@ class TestAssistableRecords:
 
     def test_assistable_hole_records_carry_no_hole_provenance(self):
         # The AI bolt readings carry no provenance entries at revision 0
-        # (the pinned 99 = 51 marks + 46 material + 2 plate) — the records
+        # (the pinned 100 = 52 marks + 46 material + 2 plate) — the records
         # show none rather than inventing one.
         baseline = _baseline()
         holes = [t for r in baseline.candidates for t in r.tasks
@@ -410,7 +410,7 @@ class TestHumanBoundaryRecords:
     """Every HUMAN_ENGINEERING_DECISION record: the fixed three-part boundary,
     no observation attached, any proposal flagged as the system deciding."""
 
-    def test_three_human_types_each_51(self):
+    def test_three_human_types_each_52(self):
         baseline = _baseline()
         by_type = {}
         for record in baseline.candidates:
@@ -418,7 +418,7 @@ class TestHumanBoundaryRecords:
                 if task.category == CATEGORY_HUMAN_ENGINEERING_DECISION:
                     by_type[task.task_type] = by_type.get(task.task_type, 0) + 1
         assert by_type == {
-            "SELECT_POSITION": 51, "SELECT_ATTACHMENT": 51, "PROVIDE_LOCATION": 51,
+            "SELECT_POSITION": 52, "SELECT_ATTACHMENT": 52, "PROVIDE_LOCATION": 52,
         }
 
     def test_human_records_carry_no_observation_and_a_flagged_proposal(self):
@@ -442,7 +442,7 @@ class TestHumanBoundaryRecords:
         for task_type, fragments in expected.items():
             records = [t for r in baseline.candidates for t in r.tasks
                        if t.task_type == task_type]
-            assert len(records) == 51
+            assert len(records) == 52
             first = records[0].human_boundary
             assert all(t.human_boundary == first for t in records)  # uniform
             assert fragments[0] in first.why_human
@@ -468,7 +468,7 @@ class TestEvidenceLookupRecords:
             for task in record.tasks:
                 if task.category == CATEGORY_EVIDENCE_LOOKUP:
                     by_type[task.task_type] = by_type.get(task.task_type, 0) + 1
-        assert by_type == {TASK_PROVIDE_PLATE: 47, TASK_PROVIDE_HOLE_DIAMETER: 32}
+        assert by_type == {TASK_PROVIDE_PLATE: 48, TASK_PROVIDE_HOLE_DIAMETER: 33}
 
     def test_evidence_records_carry_no_observation(self):
         baseline = _baseline()
@@ -500,12 +500,12 @@ class TestNegativeProofs7B5:
         baseline = _baseline()
         assert [r.package_id for r in baseline.candidates] == \
             [i.package_id for i in contract.items]
-        assert len(baseline.candidates) == 51
+        assert len(baseline.candidates) == 52
 
     def test_b_no_candidate_can_appear_twice(self):
         baseline = _baseline()
         ids = [r.package_id for r in baseline.candidates]
-        assert len(ids) == len(set(ids)) == 51
+        assert len(ids) == len(set(ids)) == 52
         for category in baseline.categories:
             assert len(category.candidate_ids) == len(set(category.candidate_ids))
             assert len(category.task_ids) == len(set(category.task_ids)) == \
@@ -683,20 +683,20 @@ class TestNegativeProofs7B5:
         assert dataclasses.asdict(old) == snapshot
         assert _record(new, "RP-0009").decision == "AUTO"
         assert new.revision == 1
-        assert new.pending_task_count == 498  # RP-0009's 10 tasks now resolved
+        assert new.pending_task_count == 508  # RP-0009's 10 tasks now resolved
         with pytest.raises(dataclasses.FrozenInstanceError):
             old.candidates[0].decision = "AUTO"
 
 
 # =============================================================================
-# The real 51-candidate regression.
+# The real 52-candidate regression.
 # =============================================================================
 
 class TestRealWorldRegression:
     """The queue stays exactly as 7B1-7B4 pinned it; RP-0009's genuine
     resolution is unchanged."""
 
-    def test_51_candidates_review_revision_zero(self):
+    def test_52_candidates_review_revision_zero(self):
         workflow = _fresh()
         contract = build_project_review_contract(workflow)
         baseline = _baseline(workflow)
@@ -709,12 +709,12 @@ class TestRealWorldRegression:
         assert all(r.decision == "REVIEW" and r.revision == 0
                    for r in baseline.candidates)
 
-    def test_selby_c1136_everywhere_and_page_26_zero(self):
+    def test_selby_c1136_everywhere_and_page_26_has_its_one_candidate(self):
         contract = build_project_review_contract(_fresh())
         assert all(i.evidence.source_drawing_id == "SELBY-C1136"
                    for i in contract.items)
         workload = build_exception_workload_map(contract)
-        assert 26 not in {g.source_page for g in workload.page_groups}
+        assert {g.source_page: g.count for g in workload.page_groups}[26] == 1
 
     def test_material_distribution_unchanged(self):
         contract = build_project_review_contract(_fresh())
@@ -730,12 +730,12 @@ class TestRealWorldRegression:
         items = build_project_review_contract(_fresh()).items
         assert sum(1 for i in items if i.evidence.detail_reference) == REAL_DETAIL_COUNT
         assert sum(1 for i in items if i.evidence.grid_reference) == REAL_GRID_COUNT
-        assert sum(1 for i in items if i.ai_member_references) == 51
+        assert sum(1 for i in items if i.ai_member_references) == 52
         assert sum(1 for i in items if i.ai_bolt_readings) == 19
         assert sum(1 for i in items if i.ai_plate_readings) == 4
-        assert sum(1 for i in items if i.ai_weld_readings) == 51
-        assert sum(1 for i in items if i.ai_connection_type is not None) == 51
-        assert sum(1 for i in items if i.ai_confidence is not None) == 51
+        assert sum(1 for i in items if i.ai_weld_readings) == 52
+        assert sum(1 for i in items if i.ai_connection_type is not None) == 52
+        assert sum(1 for i in items if i.ai_confidence is not None) == 52
         assert sum(1 for i in items if i.ai_material is not None) == 46
         assert sum(len(i.blockers) for i in items) == REAL_BLOCKER_LINKS
         assert sum(len(i.tasks) for i in items) == REAL_TOTAL_TASKS
@@ -745,9 +745,9 @@ class TestRealWorldRegression:
             for task in item.tasks:
                 counts[_classify(item, task)] = counts.get(_classify(item, task), 0) + 1
         assert counts == {
-            "AI_OBSERVATION_PRESENT": 72,
-            "SOURCE_REFERENCE_ONLY": 232,
-            "NOT_APPLICABLE": 204,
+            "AI_OBSERVATION_PRESENT": 73,
+            "SOURCE_REFERENCE_ONLY": 237,
+            "NOT_APPLICABLE": 208,
         }
 
     def test_rp0009_genuine_resolution_unchanged(self, tmp_path):

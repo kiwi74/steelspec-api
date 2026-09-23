@@ -1,0 +1,411 @@
+[
+  {
+    "page_number": 1,
+    "drawing_number": "001",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "001",
+        "member_type": null,
+        "section": "250X90PFC",
+        "quantity": 1,
+        "length_mm": 2613,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      },
+      {
+        "mark": "PL028",
+        "member_type": "plate",
+        "section": "250X12FL",
+        "quantity": 1,
+        "length_mm": 155,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "001",
+          "PL028"
+        ],
+        "connection_type": "welded",
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 88
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 2,
+    "drawing_number": "002",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "002",
+        "member_type": null,
+        "section": "75x6.0SHS",
+        "quantity": 1,
+        "length_mm": 2603,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      },
+      {
+        "mark": "PL027",
+        "member_type": "plate",
+        "section": "90x10FL",
+        "quantity": 1,
+        "length_mm": 220,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      },
+      {
+        "mark": "PL029",
+        "member_type": "plate",
+        "section": "130x12FL",
+        "quantity": 1,
+        "length_mm": 225,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": "VIEW A-A",
+        "grid_reference": null,
+        "connects_members": [
+          "002",
+          "PL029"
+        ],
+        "connection_type": "welded",
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 85
+      },
+      {
+        "detail_reference": "VIEW B-B",
+        "grid_reference": null,
+        "connects_members": [
+          "002",
+          "PL027"
+        ],
+        "connection_type": "welded",
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 85
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 3,
+    "drawing_number": "003",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "003",
+        "member_type": null,
+        "section": "75x6.0SHS",
+        "quantity": 1,
+        "length_mm": 2773,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      },
+      {
+        "mark": "PL002",
+        "member_type": "plate",
+        "section": "130X10FL",
+        "quantity": 1,
+        "length_mm": 210,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      },
+      {
+        "mark": "PL030",
+        "member_type": "plate",
+        "section": "130X12FL",
+        "quantity": 1,
+        "length_mm": 225,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": "VIEW A-A",
+        "grid_reference": null,
+        "connects_members": [
+          "003",
+          "PL030"
+        ],
+        "connection_type": "welded and bolted",
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "bolts": [
+          {
+            "quantity": 2,
+            "size": "18",
+            "grade": null
+          }
+        ],
+        "material": "300",
+        "confidence": 80
+      },
+      {
+        "detail_reference": "VIEW B-B",
+        "grid_reference": null,
+        "connects_members": [
+          "003",
+          "PL002"
+        ],
+        "connection_type": "welded and bolted",
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "bolts": [
+          {
+            "quantity": 2,
+            "size": "18",
+            "grade": null
+          }
+        ],
+        "material": "300",
+        "confidence": 80
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 4,
+    "drawing_number": "004",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "004",
+        "member_type": null,
+        "section": "75x6.0SHS",
+        "quantity": 1,
+        "length_mm": 2773,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      },
+      {
+        "mark": "PL002",
+        "member_type": "plate",
+        "section": "130x10FL",
+        "quantity": 1,
+        "length_mm": 210,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      },
+      {
+        "mark": "PL031",
+        "member_type": "plate",
+        "section": "130x12FL",
+        "quantity": 1,
+        "length_mm": 210,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": "VIEW A-A",
+        "grid_reference": null,
+        "connects_members": [
+          "004",
+          "PL031"
+        ],
+        "connection_type": "welded",
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 85
+      },
+      {
+        "detail_reference": "VIEW B-B",
+        "grid_reference": null,
+        "connects_members": [
+          "004",
+          "PL002"
+        ],
+        "connection_type": "welded",
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 85
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 5,
+    "drawing_number": "005",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "005",
+        "member_type": "beam",
+        "section": "310UB40",
+        "quantity": 1,
+        "length_mm": 5017,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      },
+      {
+        "mark": "CL004",
+        "member_type": null,
+        "section": "90x10EA",
+        "quantity": 1,
+        "length_mm": 165,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      },
+      {
+        "mark": "PL008",
+        "member_type": "plate",
+        "section": "180x20FL",
+        "quantity": 1,
+        "length_mm": 340,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      },
+      {
+        "mark": "PL018",
+        "member_type": "plate",
+        "section": "160x10PL",
+        "quantity": 1,
+        "length_mm": 298,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      },
+      {
+        "mark": "PL025",
+        "member_type": "plate",
+        "section": "81x10PL",
+        "quantity": 1,
+        "length_mm": 80,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      },
+      {
+        "mark": "PL032",
+        "member_type": "plate",
+        "section": "165x10PL",
+        "quantity": 1,
+        "length_mm": 304,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": "VIEW A-A",
+        "grid_reference": null,
+        "connects_members": [
+          "005",
+          "PL008",
+          "CL004"
+        ],
+        "connection_type": "welded and bolted",
+        "bolts": [
+          {
+            "quantity": 4,
+            "size": "22mm holes",
+            "grade": null
+          }
+        ],
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 75
+      },
+      {
+        "detail_reference": "VIEW B-B",
+        "grid_reference": null,
+        "connects_members": [
+          "005",
+          "PL018",
+          "PL032",
+          "PL025"
+        ],
+        "connection_type": "welded and bolted",
+        "bolts": [
+          {
+            "quantity": 2,
+            "size": "18mm holes",
+            "grade": null
+          }
+        ],
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 75
+      }
+    ],
+    "parse_failed": false
+  }
+]

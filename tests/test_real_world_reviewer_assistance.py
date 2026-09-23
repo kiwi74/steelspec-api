@@ -1,6 +1,6 @@
 """MILESTONE 7B6 — Real-World Assisted Review Execution Proof.
 
-Proves, over the genuine 51-candidate Selby Square workload, that the
+Proves, over the genuine 52-candidate Selby Square workload, that the
 workload-reduction opportunities 7B5 identified can actually be executed
 through the existing review workflow — with the exact human engineering
 boundary preserved and outcomes equivalent to genuine unassisted review.
@@ -12,9 +12,9 @@ WHAT THIS FILE PROVES:
   - Every AI observation is carried byte-verbatim ("22mm holes" stays
     "22mm holes"; "300" stays an observation; missing material stays
     missing). No conversion happens anywhere in the assistance texts.
-  - The human boundary: 153 HUMAN tasks carry no value and the fixed
-    boundary; 79 EVIDENCE_LOOKUP tasks carry no value, only the source
-    anchor; the 72 ASSISTABLE tasks display the observation and demand an
+  - The human boundary: 156 HUMAN tasks carry no value and the fixed
+    boundary; 81 EVIDENCE_LOOKUP tasks carry no value, only the source
+    anchor; the 73 ASSISTABLE tasks display the observation and demand an
     explicit reviewer act — the assistance layer has no resolution method
     and never confirms anything.
   - The existing 7AU provenance semantics execute unchanged: confirming a
@@ -41,7 +41,7 @@ BRIEF ITEM MAP:
   real Selby execution ......... TestRealWorldExecution
   assisted == unassisted ....... TestEquivalence
   refusal / no-op negatives .... TestNegativeProofs
-  51-candidate regression ...... TestRegression
+  52-candidate regression ...... TestRegression
 """
 
 import ast
@@ -271,7 +271,7 @@ class TestHumanBoundary:
         assistance = _assistance(_fresh())
         human = [t for c in assistance.candidates for t in c.tasks
                  if t.category == CATEGORY_HUMAN_ENGINEERING_DECISION]
-        assert len(human) == 153
+        assert len(human) == 156
         for task in human:
             assert task.current_value is None
             assert task.human_boundary is not None
@@ -287,7 +287,7 @@ class TestHumanBoundary:
         assistance = _assistance(_fresh())
         evidence = [t for c in assistance.candidates for t in c.tasks
                     if t.category == CATEGORY_EVIDENCE_LOOKUP]
-        assert len(evidence) == 79
+        assert len(evidence) == 81
         for task in evidence:
             assert task.current_value is None
             assert task.human_boundary is None
@@ -299,7 +299,7 @@ class TestHumanBoundary:
         assistance = _assistance(_fresh())
         assistable = [t for c in assistance.candidates for t in c.tasks
                       if t.category == CATEGORY_ASSISTABLE]
-        assert len(assistable) == 72
+        assert len(assistable) == 73
         for task in assistable:
             assert task.current_value is not None
             assert task.proposal == PROPOSAL_TEXTS[0]
@@ -688,7 +688,7 @@ class TestNegativeProofs:
         assistance = _assistance(_fresh())
         ids = [c.package_id for c in assistance.candidates]
         assert ids == [i.package_id for i in contract.items] == list(EXPECTED_IDS)
-        assert len(ids) == len(set(ids)) == 51
+        assert len(ids) == len(set(ids)) == 52
 
     def test_provenance_is_never_manipulated_by_assistance(self, tmp_path):
         workflow = _fresh()
@@ -716,7 +716,7 @@ class TestNegativeProofs:
 
 
 # =============================================================================
-# The 51-candidate regression.
+# The 52-candidate regression.
 # =============================================================================
 
 class TestRegression:
@@ -735,9 +735,9 @@ class TestRegression:
             CATEGORY_TASK_COUNTS
         assistance = build_reviewer_assistance(contract)
         assert assistance.revision == 0
-        assert assistance.candidate_count == 51
-        assert assistance.task_count == 508
-        assert assistance.pending_task_count == 508
+        assert assistance.candidate_count == 52
+        assert assistance.task_count == 518
+        assert assistance.pending_task_count == 518
         observed = {}
         for candidate in assistance.candidates:
             for task in candidate.tasks:

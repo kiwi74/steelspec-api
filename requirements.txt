@@ -7,3 +7,5 @@ reportlab==4.2.5
 pydantic==2.9.2
 anthropic==0.40.0
 pdf2image==1.17.0
+cadquery==2.8.0
+pypdf==6.19.0

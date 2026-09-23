@@ -39,6 +39,7 @@ STRICT RULES — these are non-negotiable:
 - Do not assume mark-letter conventions (e.g. "B" does not always mean beam). Use context on the page itself.
 - Report the mark exactly as labelled — do not append the section size to the mark string. If a callout reads "P1 89x5 SHS", the mark is "P1" and the section is "89x5 SHS", reported as separate fields.
 - For connections: only report bolt/plate/weld specifications that are explicitly shown or dimensioned on this page. If a connection is referenced (e.g. "see Detail 4/S102") but not shown here, do not guess its contents — just note the detail reference.
+- Material: report a material grade/specification ONLY when it is explicitly stated on this page for the connection (or for the members it joins when clearly associated with them). Preserve the exact wording — never normalise one designation into another (e.g. "AS/NZS 3678-300" is not "300PLUS"). Never infer a grade from the member's section size, member type, project location, convention, history or any other context; null when no material is stated.
 
 For this page, identify:
 1. Drawing metadata if visible: drawing number, title, revision.
@@ -71,10 +72,13 @@ Respond with ONLY valid JSON, no other text, in exactly this shape:
       "bolts": [{"quantity": 4, "size": "M20", "grade": "8.8"}],
       "plates": [{"type": "end_plate", "thickness_mm": 12, "width_mm": 180, "depth_mm": 250}],
       "welds": [{"type": "fillet", "size_mm": 8}],
+      "material": "300PLUS" or null,
       "confidence": 88
     }
   ]
 }
+
+For "material": the exact designation as printed on the page (e.g. "300PLUS", "AS/NZS 3678-300", "S355") or null when the page states none.
 
 Omit "bolts", "plates", or "welds" arrays entirely (or leave empty) if that information isn't shown for a connection — do not invent placeholder values.
 
@@ -101,11 +105,15 @@ def _extract_json(text: str) -> dict:
     return json.loads(cleaned)
 
 
-def render_pages_to_png(filepath: str, max_pages: int) -> list[bytes]:
-    """Render each PDF page to a PNG at a resolution good enough for a vision model to read drawing text."""
-    images = convert_from_path(filepath, dpi=200, fmt="png")
+def render_pages_to_png(filepath: str, max_pages: int, *, first_page: int = 1) -> list[bytes]:
+    """Render `max_pages` PDF pages starting at 1-based `first_page` to PNGs
+    at a resolution good enough for a vision model to read drawing text."""
+    images = convert_from_path(
+        filepath, dpi=200, fmt="png",
+        first_page=first_page, last_page=first_page + max_pages - 1,
+    )
     pages = []
-    for img in images[:max_pages]:
+    for img in images:
         buf = BytesIO()
         img.save(buf, format="PNG")
         pages.append(buf.getvalue())
@@ -113,11 +121,15 @@ def render_pages_to_png(filepath: str, max_pages: int) -> list[bytes]:
 
 
 def analyze_pdf_pages(
-    filepath: str, user_id: str, project_id: str, drawing_id: str, max_pages: int
+    filepath: str, user_id: str, project_id: str, drawing_id: str, max_pages: int,
+    *, first_page: int = 1,
 ) -> list[PageExtraction]:
     """
-    Renders every page, asks Claude what it sees, and returns the raw
-    per-page results. No matching, no validation, no database writes
+    Renders the pages, asks Claude what it sees, and returns the raw
+    per-page results. `max_pages` pages are analysed starting at the
+    1-based `first_page` (default 1: the drawing's first pages, as before);
+    page numbers stay true — a later slice of the set reports its real
+    page numbers. No matching, no validation, no database writes
     to engineering-data tables (page images ARE persisted here, since
     that's source-of-truth storage, not an engineering interpretation).
     """
@@ -128,13 +140,13 @@ def analyze_pdf_pages(
         )
 
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
-    pages = render_pages_to_png(filepath, max_pages)
+    pages = render_pages_to_png(filepath, max_pages, first_page=first_page)
     if not pages:
         raise RuntimeError("Could not render any pages from this PDF.")
 
     results: list[PageExtraction] = []
 
-    for page_num, page_bytes in enumerate(pages, start=1):
+    for page_num, page_bytes in enumerate(pages, start=first_page):
         upload_page_image(user_id, project_id, drawing_id, page_num, page_bytes)
 
         b64_image = base64.standard_b64encode(page_bytes).decode("utf-8")

@@ -3,7 +3,7 @@ Milestone 7B9 — REAL-WORLD EXTERNAL PROVIDER READINESS GATE PROOF.
 
 Proves the provider_readiness_gate module — the deterministic, provider-neutral
 gate between the proven 7B7/7B8 assistant boundary and ANY future real external
-provider — over the genuine PROJ-7AV-SELBY 51-candidate workload.
+provider — over the genuine PROJ-7AV-SELBY 52-candidate workload.
 
 Proven here:
 
@@ -97,7 +97,7 @@ from tests.test_real_world_assistant_message_boundary import (
     RP0001_CONFIRM_VALUE,
     RP0008_HOLE_READING,
     RP0033_MATERIAL_ANCHOR,
-    RP0045_PLATE_READING,
+    RP0046_PLATE_READING,
 )
 from tests.test_real_world_exception_workload import EXPECTED_IDS
 from tests.test_real_world_human_exception_review import (
@@ -696,7 +696,7 @@ class TestWireProjection:
             assert projection.fields is request.fields
             assert all(isinstance(field, AssistantRequestField)
                        for field in projection.fields)
-        assert len(genuine_requests) == 863
+        assert len(genuine_requests) == 880
 
 
 # =============================================================================
@@ -941,26 +941,26 @@ class TestDeterminism:
 
 
 # =============================================================================
-# 11. Real Selby proof: 51 candidates, 508 tasks, 863 projections.
+# 11. Real Selby proof: 52 candidates, 518 tasks, 880 projections.
 # =============================================================================
 
 class TestRealSelbyProof:
-    def test_51_candidates_508_tasks_in_submission_order(self, real_assistance):
-        assert real_assistance.candidate_count == 51
-        assert real_assistance.task_count == 508
+    def test_52_candidates_518_tasks_in_submission_order(self, real_assistance):
+        assert real_assistance.candidate_count == 52
+        assert real_assistance.task_count == 518
         assert [candidate.package_id for candidate in real_assistance.candidates] \
             == list(EXPECTED_IDS)
 
     def test_all_863_genuine_requests_project(self, genuine_requests):
         projections = [build_wire_projection(request)
                        for request in genuine_requests]
-        assert len(projections) == 863
+        assert len(projections) == 880
         counts = Counter(projection.role for projection in projections)
         assert counts == {
-            ROLE_EXPLAIN_TASK: 508,
-            ROLE_DESCRIBE_OBSERVATION: 72,
-            ROLE_DRAFT_ACKNOWLEDGMENT: 204,
-            ROLE_EVIDENCE_NAVIGATION: 79,
+            ROLE_EXPLAIN_TASK: 518,
+            ROLE_DESCRIBE_OBSERVATION: 73,
+            ROLE_DRAFT_ACKNOWLEDGMENT: 208,
+            ROLE_EVIDENCE_NAVIGATION: 81,
         }
 
     def test_no_projection_contains_file_or_credential_content(
@@ -998,11 +998,11 @@ class TestRealSelbyProof:
         assert "300" in current_values[0]
 
     def test_plate_observation_stays_byte_exact(self, real_assistance):
-        request = _descr(real_assistance, "RP-0045", TASK_PROVIDE_PLATE)
+        request = _descr(real_assistance, "RP-0046", TASK_PROVIDE_PLATE)
         projection = build_wire_projection(request)
         current_values = [field.value for field in projection.fields
                           if field.name == "current_value"]
-        assert current_values == [RP0045_PLATE_READING]
+        assert current_values == [RP0046_PLATE_READING]
 
     def test_missing_material_stays_missing(self, material_assistance):
         task = _task(material_assistance, "RP-0033",
@@ -1130,24 +1130,24 @@ class TestRegression:
         categories = Counter(
             record.category
             for candidate in baseline.candidates for record in candidate.tasks)
-        assert sum(categories.values()) == 508
-        assert categories[CATEGORY_ASSISTABLE] == 72
-        assert categories[CATEGORY_HUMAN_ENGINEERING_DECISION] == 153
-        assert categories[CATEGORY_ADMINISTRATIVE] == 204
-        assert categories[CATEGORY_EVIDENCE_LOOKUP] == 79
+        assert sum(categories.values()) == 518
+        assert categories[CATEGORY_ASSISTABLE] == 73
+        assert categories[CATEGORY_HUMAN_ENGINEERING_DECISION] == 156
+        assert categories[CATEGORY_ADMINISTRATIVE] == 208
+        assert categories[CATEGORY_EVIDENCE_LOOKUP] == 81
 
     def test_7b7_boundary_sweep_unchanged(self, genuine_requests):
         counts = Counter(request.role for request in genuine_requests)
         assert counts == {
-            ROLE_EXPLAIN_TASK: 508,
-            ROLE_DESCRIBE_OBSERVATION: 72,
-            ROLE_DRAFT_ACKNOWLEDGMENT: 204,
-            ROLE_EVIDENCE_NAVIGATION: 79,
+            ROLE_EXPLAIN_TASK: 518,
+            ROLE_DESCRIBE_OBSERVATION: 73,
+            ROLE_DRAFT_ACKNOWLEDGMENT: 208,
+            ROLE_EVIDENCE_NAVIGATION: 81,
         }
 
     def test_7b8_session_unchanged(self, real_assistance):
         session = run_session(real_assistance, StandInAssistant(PROFILE_NORMAL))
-        assert session.turn_count == 863
+        assert session.turn_count == 880
         assert all(record.result_kind == RESULT_DISPLAY_MESSAGE
                    for record in session.records)
 

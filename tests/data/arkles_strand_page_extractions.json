@@ -1,0 +1,1386 @@
+[
+  {
+    "page_number": 1,
+    "drawing_number": null,
+    "drawing_title": "Cover Sheet",
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 2,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": true
+  },
+  {
+    "page_number": 3,
+    "drawing_number": null,
+    "drawing_title": "Site Plan",
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 4,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 5,
+    "drawing_number": null,
+    "drawing_title": "Site Plan: Earthworks",
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 6,
+    "drawing_number": "41",
+    "drawing_title": "Foundation Setout Plan",
+    "revision": "6",
+    "raw_members": [
+      {
+        "mark": "P1",
+        "member_type": "steel post",
+        "section": "89x5 SHS",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P2",
+        "member_type": "steel post",
+        "section": "250UC46",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P3",
+        "member_type": "steel post",
+        "section": "300PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P4",
+        "member_type": "steel post",
+        "section": "300PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P5",
+        "member_type": "steel post",
+        "section": "250UB37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P6",
+        "member_type": "steel post",
+        "section": "250UB37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 7,
+    "drawing_number": "41",
+    "drawing_title": "Deck layout plan",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": null,
+        "member_type": "bearer",
+        "section": "2/190x45 SG8 H3.2",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": null,
+        "member_type": "bearer",
+        "section": "2/190x45 SG8 H3.2 Double Boundary Joists",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": null,
+        "member_type": "deck joist",
+        "section": "190x45 SG8 H3.2",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": null,
+        "member_type": "deck joist",
+        "section": "140x45 H3 SG8",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": null,
+        "member_type": "stringer",
+        "section": "140x45 H4 SG8",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": null,
+        "member_type": "stringer",
+        "section": "190x45 H4 SG8",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": null,
+        "member_type": "timber pile",
+        "section": "125x125 H5",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 80
+      },
+      {
+        "mark": null,
+        "member_type": "bearer",
+        "section": "2/140x45 SG8 H3.2",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "stringer 140x45 H4 SG8",
+          "structure"
+        ],
+        "connection_type": "bolted",
+        "bolts": [
+          {
+            "quantity": null,
+            "size": "M12",
+            "grade": null
+          }
+        ],
+        "confidence": 65
+      },
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "stringer 190x45 H4 SG8",
+          "structure"
+        ],
+        "connection_type": "bolted",
+        "bolts": [
+          {
+            "quantity": null,
+            "size": "M12",
+            "grade": null
+          }
+        ],
+        "confidence": 65
+      },
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "deck joist",
+          "bearer"
+        ],
+        "connection_type": "bolted",
+        "bolts": [
+          {
+            "quantity": null,
+            "size": "SQ4 12mm",
+            "grade": null
+          }
+        ],
+        "confidence": 55
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 8,
+    "drawing_number": null,
+    "drawing_title": "Garage Floor Plan",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "P1",
+        "member_type": "steel post",
+        "section": "89x5 SHS",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P2",
+        "member_type": "steel post",
+        "section": "250PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P3",
+        "member_type": "steel post",
+        "section": "200UC46",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P4",
+        "member_type": "steel post",
+        "section": "300PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P5",
+        "member_type": "steel post",
+        "section": "250UB37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 9,
+    "drawing_number": "9",
+    "drawing_title": "Ground Floor Plan",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "P1",
+        "member_type": "post/column",
+        "section": "89x5 SHS",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P2",
+        "member_type": "post/column",
+        "section": "250PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P3",
+        "member_type": "post/column",
+        "section": "300PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P4",
+        "member_type": "post/column",
+        "section": "300PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P5",
+        "member_type": "post/column",
+        "section": "250UB37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 10,
+    "drawing_number": "10",
+    "drawing_title": "First Floor Plan",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "P1",
+        "member_type": "post",
+        "section": "89x5 SHS",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 90
+      },
+      {
+        "mark": "P2",
+        "member_type": "post",
+        "section": "200UC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P3",
+        "member_type": "post",
+        "section": "100PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P4",
+        "member_type": "post",
+        "section": "100PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P5",
+        "member_type": "post",
+        "section": "250UB37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 11,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": true
+  },
+  {
+    "page_number": 12,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": true
+  },
+  {
+    "page_number": 13,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": true
+  },
+  {
+    "page_number": 14,
+    "drawing_number": "14",
+    "drawing_title": "Ground Floor Roof Framing Plan",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "L2",
+        "member_type": "lintel/beam",
+        "section": "250PFC",
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "L3",
+        "member_type": "lintel/beam",
+        "section": "250PFC",
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "PORTAL FRAME B27",
+        "member_type": "portal frame",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 78
+      },
+      {
+        "mark": "B11",
+        "member_type": "beam",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "B12",
+        "member_type": "beam",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "B14",
+        "member_type": "beam",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "B17",
+        "member_type": "beam",
+        "section": "225",
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "B17",
+        "member_type": "beam",
+        "section": "225",
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 60
+      },
+      {
+        "mark": "BF2",
+        "member_type": "beam/frame",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "D10",
+        "member_type": null,
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 60
+      },
+      {
+        "mark": "D15",
+        "member_type": null,
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 60
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 15,
+    "drawing_number": "15",
+    "drawing_title": "First Floor Roof Framing Plan",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "RB1",
+        "member_type": "ridge beam",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": "RB2",
+        "member_type": "ridge beam",
+        "section": null,
+        "quantity": 2,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": "RB3",
+        "member_type": "ridge beam",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": "P1",
+        "member_type": "post",
+        "section": "89x5 SHS",
+        "quantity": 2,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 85
+      },
+      {
+        "mark": "P2",
+        "member_type": "post",
+        "section": "250PFC",
+        "quantity": 2,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 82
+      },
+      {
+        "mark": "P3",
+        "member_type": "post",
+        "section": "200UC46",
+        "quantity": 2,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 82
+      },
+      {
+        "mark": "RB5",
+        "member_type": "ridge beam",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "LBW",
+        "member_type": "beam",
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "L17",
+        "member_type": "lintel",
+        "section": "200x90 Hy90",
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "Q5",
+        "member_type": null,
+        "section": null,
+        "quantity": 2,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 60
+      },
+      {
+        "mark": "BF1",
+        "member_type": null,
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 58
+      },
+      {
+        "mark": "BF2",
+        "member_type": null,
+        "section": null,
+        "quantity": 1,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 58
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 16,
+    "drawing_number": null,
+    "drawing_title": "First Floor Roof Cladding Plan",
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 17,
+    "drawing_number": "41",
+    "drawing_title": "Truss Layout",
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 18,
+    "drawing_number": null,
+    "drawing_title": "Truss Layout",
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 19,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 20,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 21,
+    "drawing_number": "21",
+    "drawing_title": "Sections",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "BF1",
+        "member_type": "portal",
+        "section": null,
+        "quantity": null,
+        "length_mm": 11153,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": "RB1",
+        "member_type": "roof beam",
+        "section": "390x90 hyONE",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "RB2",
+        "member_type": "roof beam",
+        "section": "3/240x45 hyONE",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "RB3",
+        "member_type": "roof beam",
+        "section": "3/240x45 F27",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "RB4",
+        "member_type": "roof beam",
+        "section": "2/390x45 F27",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "RB5",
+        "member_type": "roof beam",
+        "section": "250PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "RB6",
+        "member_type": "roof beam",
+        "section": "200x90 hy90",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "L1",
+        "member_type": "lintel",
+        "section": "150PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "L2",
+        "member_type": "lintel",
+        "section": "200PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "L3",
+        "member_type": "lintel",
+        "section": "250PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "L4",
+        "member_type": "lintel",
+        "section": "3/200x45 hySpan",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 75
+      },
+      {
+        "mark": "L5",
+        "member_type": "lintel",
+        "section": "3/200x45 hySpan",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 70
+      },
+      {
+        "mark": "BF1",
+        "member_type": "bracing frame",
+        "section": "310UB40 & 250 PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": "BF2",
+        "member_type": "bracing frame",
+        "section": "200UB30 & 250UB37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": "BF3",
+        "member_type": "bracing frame",
+        "section": "250UB37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": "P1",
+        "member_type": "steel post",
+        "section": "89x5 SHS",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 80
+      },
+      {
+        "mark": "P2",
+        "member_type": "steel post",
+        "section": "250PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 80
+      },
+      {
+        "mark": "P3",
+        "member_type": "steel post",
+        "section": "200UC46",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 80
+      },
+      {
+        "mark": "P4",
+        "member_type": "steel post",
+        "section": "250PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 80
+      },
+      {
+        "mark": "P5",
+        "member_type": "steel post",
+        "section": "200x90 hy90",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 78
+      },
+      {
+        "mark": "DB1",
+        "member_type": "deck beam",
+        "section": "1200PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "cantilevered deck",
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "DB2",
+        "member_type": "deck beam",
+        "section": "1/240x45 hySpan",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "DB3",
+        "member_type": "deck beam",
+        "section": "3/240x45 F27",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "DB4",
+        "member_type": "deck beam",
+        "section": "3/240x45 F27",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 60
+      },
+      {
+        "mark": "DB5",
+        "member_type": "deck beam",
+        "section": "3/240x45 SG8",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 60
+      },
+      {
+        "mark": "RB2",
+        "member_type": "roof beam",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "Section X-X / living area",
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "B12",
+        "member_type": "beam",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "Section X-X / bed 2 area",
+        "detail_reference": null,
+        "confidence": 60
+      },
+      {
+        "mark": "L28",
+        "member_type": "lintel",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "entry/landing area",
+        "detail_reference": null,
+        "confidence": 55
+      },
+      {
+        "mark": "L9",
+        "member_type": "lintel",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "Section X-X",
+        "detail_reference": null,
+        "confidence": 55
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 22,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": true
+  },
+  {
+    "page_number": 23,
+    "drawing_number": "23",
+    "drawing_title": "Sections",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "BF1",
+        "member_type": "portal/beam",
+        "section": "259PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 72
+      },
+      {
+        "mark": "BF2",
+        "member_type": "portal/beam",
+        "section": "23UB37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 55
+      },
+      {
+        "mark": "BF1",
+        "member_type": "portal",
+        "section": "110UB48",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "BF1",
+        "member_type": "portal",
+        "section": "200UB30",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 65
+      },
+      {
+        "mark": "BF3",
+        "member_type": "portal",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "GARAGE area",
+        "detail_reference": null,
+        "confidence": 60
+      },
+      {
+        "mark": "BF2",
+        "member_type": "portal",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 55
+      },
+      {
+        "mark": "RB6",
+        "member_type": "beam",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "BED 1 / right side",
+        "detail_reference": null,
+        "confidence": 55
+      },
+      {
+        "mark": "ST2",
+        "member_type": null,
+        "section": "S102",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "S102",
+        "confidence": 50
+      },
+      {
+        "mark": "ST8",
+        "member_type": null,
+        "section": "S102",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "S102",
+        "confidence": 50
+      },
+      {
+        "mark": "ST9",
+        "member_type": null,
+        "section": "S102",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "S102",
+        "confidence": 50
+      },
+      {
+        "mark": "ST10",
+        "member_type": null,
+        "section": "S102",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "S102",
+        "confidence": 50
+      },
+      {
+        "mark": "FT2",
+        "member_type": null,
+        "section": "S101",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "S101",
+        "confidence": 50
+      },
+      {
+        "mark": "FT8",
+        "member_type": null,
+        "section": "S102",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "S102",
+        "confidence": 50
+      },
+      {
+        "mark": "L2",
+        "member_type": "lintel",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "GARAGE",
+        "detail_reference": null,
+        "confidence": 55
+      },
+      {
+        "mark": "L3",
+        "member_type": "lintel",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": "GARAGE",
+        "detail_reference": null,
+        "confidence": 55
+      },
+      {
+        "mark": "L13",
+        "member_type": "lintel",
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 55
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 24,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 25,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 26,
+    "drawing_number": null,
+    "drawing_title": "Shingle Roofing Details",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "L2/L3",
+        "member_type": "channel",
+        "section": "250 PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "12",
+        "confidence": 82
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 27,
+    "drawing_number": null,
+    "drawing_title": "Shingle Roofing Details",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "RB2",
+        "member_type": "beam",
+        "section": "250UB 25",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "15",
+        "confidence": 52
+      },
+      {
+        "mark": "B8",
+        "member_type": "beam",
+        "section": "290UB 37",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "17",
+        "confidence": 55
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 28,
+    "drawing_number": "28",
+    "drawing_title": "Shingle Roofing Details",
+    "revision": null,
+    "raw_members": [
+      {
+        "mark": "RB3",
+        "member_type": "beam",
+        "section": "246x90 hy90",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "18",
+        "confidence": 85
+      },
+      {
+        "mark": "L17",
+        "member_type": null,
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "19",
+        "confidence": 72
+      },
+      {
+        "mark": "L20",
+        "member_type": null,
+        "section": null,
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "20",
+        "confidence": 72
+      },
+      {
+        "mark": "RB1",
+        "member_type": "beam",
+        "section": "300x90 Hyone",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "21",
+        "confidence": 82
+      },
+      {
+        "mark": "L-T-150PFC",
+        "member_type": null,
+        "section": "150PFC",
+        "quantity": null,
+        "length_mm": null,
+        "grid_reference": null,
+        "detail_reference": "21",
+        "confidence": 68
+      }
+    ],
+    "raw_connections": [],
+    "parse_failed": false
+  },
+  {
+    "page_number": 29,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": true
+  },
+  {
+    "page_number": 30,
+    "drawing_number": null,
+    "drawing_title": null,
+    "revision": null,
+    "raw_members": [],
+    "raw_connections": [],
+    "parse_failed": false
+  }
+]

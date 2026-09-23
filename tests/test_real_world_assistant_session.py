@@ -2,7 +2,7 @@
 Milestone 7B8 — REAL-WORLD DETERMINISTIC STAND-IN SESSION PROOF.
 
 Proves the assistant_session module — the genuine CALLER of the committed 7B7
-assistant message boundary — against the real 51-candidate Selby workload.
+assistant message boundary — against the real 52-candidate Selby workload.
 The stand-in defined in the module is the only representation of any future
 external assistant: normal, unavailable, slow, malformed, contradictory,
 hostile, empty and oversized behaviour must ALL stay outside engineering
@@ -95,7 +95,7 @@ from tests.test_real_world_assistant_message_boundary import (
     RP0008_HOLE_READING,
     RP0009_HOLE_READING,
     RP0033_MATERIAL_ANCHOR,
-    RP0045_PLATE_READING,
+    RP0046_PLATE_READING,
 )
 from tests.test_real_world_exception_workload import EXPECTED_IDS
 from tests.test_real_world_human_exception_review import (
@@ -440,7 +440,7 @@ class TestSessionFlow:
 
         monkeypatch.setattr(session_module, "build_assistant_request", spy)
         build_session_requests(real_assistance)
-        assert len(calls) == 863
+        assert len(calls) == 880
         assert all(isinstance(args[0], ReviewerAssistance)
                    and "role" in kwargs for args, kwargs in calls)
 
@@ -455,7 +455,7 @@ class TestSessionFlow:
 
         monkeypatch.setattr(session_module, "build_assistant_request", spy)
         run_session(real_assistance, StandInAssistant(PROFILE_NORMAL))
-        assert len(calls) == 863
+        assert len(calls) == 880
 
     def test_turns_parse_render_and_check_only_through_the_boundary(
             self, real_assistance, monkeypatch):
@@ -508,7 +508,7 @@ class TestSessionFlow:
     def test_full_normal_session_is_all_display_messages(self, real_assistance,
                                                          normal_stand_in):
         session = run_session(real_assistance, normal_stand_in)
-        assert session.turn_count == 863
+        assert session.turn_count == 880
         assert session.revision == 0
         assert all(record.result_kind == RESULT_DISPLAY_MESSAGE
                    for record in session.records)
@@ -654,7 +654,7 @@ class TestFailureContainment:
         assistance = _assistance(workflow)
         before = _snapshot(workflow, tmp_path)
         session = run_session(assistance, StandInAssistant(PROFILE_UNAVAILABLE))
-        assert session.turn_count == 863
+        assert session.turn_count == 880
         assert all(record.result_kind == RESULT_ASSISTANT_UNAVAILABLE
                    for record in session.records)
         assert _snapshot(workflow, tmp_path) == before
@@ -895,10 +895,10 @@ class TestRequiredSelbyCases:
         assert _request_fields(request, "current_value")[0] == \
             RP0008_HOLE_READING
 
-    def test_rp0045_plate_reading_verbatim(self, real_assistance):
-        request = _descr(real_assistance, "RP-0045", TASK_PROVIDE_PLATE)
+    def test_rp0046_plate_reading_verbatim(self, real_assistance):
+        request = _descr(real_assistance, "RP-0046", TASK_PROVIDE_PLATE)
         assert _request_fields(request, "current_value")[0] == \
-            RP0045_PLATE_READING
+            RP0046_PLATE_READING
         session = run_session(real_assistance, StandInAssistant(PROFILE_NORMAL),
                               requests=(request,))
         assert session.records[0].result_kind == RESULT_DISPLAY_MESSAGE
@@ -1029,7 +1029,7 @@ class TestHostileReplay:
         assistance = _assistance(workflow)
         before = _snapshot(workflow, tmp_path)
         session = run_session(assistance, StandInAssistant(PROFILE_HOSTILE))
-        assert session.turn_count == 863
+        assert session.turn_count == 880
         assert all(record.result_kind == RESULT_DISPLAY_MESSAGE
                    for record in session.records)
         hostile_texts = [stand_in_respond(StandInAssistant(PROFILE_HOSTILE),
@@ -1070,13 +1070,13 @@ class TestHostileReplay:
 
 
 # =============================================================================
-# 10. The full real 51-candidate workload.
+# 10. The full real 52-candidate workload.
 # =============================================================================
 
 class TestRealWorkloadSweep:
-    def test_51_candidates_508_tasks_in_submission_order(self, real_assistance):
-        assert real_assistance.candidate_count == 51
-        assert real_assistance.task_count == 508
+    def test_52_candidates_518_tasks_in_submission_order(self, real_assistance):
+        assert real_assistance.candidate_count == 52
+        assert real_assistance.task_count == 518
         assert [candidate.package_id for candidate in real_assistance.candidates] \
             == list(EXPECTED_IDS)
 
@@ -1084,12 +1084,12 @@ class TestRealWorkloadSweep:
         requests = build_session_requests(real_assistance)
         counts = Counter(request.role for request in requests)
         assert counts == {
-            ROLE_EXPLAIN_TASK: 508,
-            ROLE_DESCRIBE_OBSERVATION: 72,
-            ROLE_DRAFT_ACKNOWLEDGMENT: 204,
-            ROLE_EVIDENCE_NAVIGATION: 79,
+            ROLE_EXPLAIN_TASK: 518,
+            ROLE_DESCRIBE_OBSERVATION: 73,
+            ROLE_DRAFT_ACKNOWLEDGMENT: 208,
+            ROLE_EVIDENCE_NAVIGATION: 81,
         }
-        assert len(requests) == 863
+        assert len(requests) == 880
 
     def test_every_request_identity_is_genuine(self, real_assistance):
         tasks_by_package = {
@@ -1121,10 +1121,10 @@ class TestRealWorkloadSweep:
     def test_full_normal_sweep_renders_and_matches_pinned_counts(
             self, real_assistance, normal_stand_in):
         session = run_session(real_assistance, normal_stand_in)
-        assert session.turn_count == 863
+        assert session.turn_count == 880
         rendered = render_session(session)
         assert rendered.startswith(SESSION_MARKER)
-        assert "revision 0, 863 turns" in rendered
+        assert "revision 0, 880 turns" in rendered
         assert all(record.rendered_text.startswith(DISPLAY_PREFIX)
                    for record in session.records)
         assert all(record.result_kind == RESULT_DISPLAY_MESSAGE
@@ -1159,12 +1159,12 @@ class TestContractImmutability:
                         PROFILE_MALFORMED, PROFILE_CONTRADICTORY,
                         PROFILE_HOSTILE, PROFILE_EMPTY, PROFILE_OVERSIZED):
             session = run_session(assistance, StandInAssistant(profile))
-            assert session.turn_count == 863, profile
+            assert session.turn_count == 880, profile
             assert _snapshot(workflow, tmp_path) == before, profile
         assert build_project_review_contract(workflow).revision == 0
         assert {i.decision for i in build_project_review_contract(workflow).items} \
             == {"REVIEW"}
-        assert _assistance(workflow).pending_task_count == 508
+        assert _assistance(workflow).pending_task_count == 518
 
     def test_consecutive_sessions_leave_contract_identical(self, tmp_path):
         workflow = _fresh()
@@ -1294,11 +1294,11 @@ class TestRegression:
         categories = Counter(
             record.category
             for candidate in baseline.candidates for record in candidate.tasks)
-        assert sum(categories.values()) == 508
-        assert categories[CATEGORY_ASSISTABLE] == 72
-        assert categories[CATEGORY_HUMAN_ENGINEERING_DECISION] == 153
-        assert categories[CATEGORY_ADMINISTRATIVE] == 204
-        assert categories[CATEGORY_EVIDENCE_LOOKUP] == 79
+        assert sum(categories.values()) == 518
+        assert categories[CATEGORY_ASSISTABLE] == 73
+        assert categories[CATEGORY_HUMAN_ENGINEERING_DECISION] == 156
+        assert categories[CATEGORY_ADMINISTRATIVE] == 208
+        assert categories[CATEGORY_EVIDENCE_LOOKUP] == 81
 
     def test_rp0009_genuine_resolution_regression(self, tmp_path):
         workflow = _fresh()
@@ -1348,10 +1348,10 @@ class TestRegression:
                         real_assistance, role=ROLE_EVIDENCE_NAVIGATION,
                         package_id=candidate.package_id, task_id=task.task_id)
                     counts[ROLE_EVIDENCE_NAVIGATION] += 1
-        assert counts == {ROLE_EXPLAIN_TASK: 508,
-                          ROLE_DESCRIBE_OBSERVATION: 72,
-                          ROLE_DRAFT_ACKNOWLEDGMENT: 204,
-                          ROLE_EVIDENCE_NAVIGATION: 79}
+        assert counts == {ROLE_EXPLAIN_TASK: 518,
+                          ROLE_DESCRIBE_OBSERVATION: 73,
+                          ROLE_DRAFT_ACKNOWLEDGMENT: 208,
+                          ROLE_EVIDENCE_NAVIGATION: 81}
 
     def test_rp0009_hole_reading_pinned(self, real_assistance):
         request = _descr(real_assistance, "RP-0009", TASK_CONFIRM_AI_VALUES)

@@ -1,0 +1,216 @@
+[
+  {
+    "page_number": 21,
+    "drawing_number": "021x",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "021x",
+        "member_type": null,
+        "section": "200UB25",
+        "quantity": 1,
+        "length_mm": 1160,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "021x"
+        ],
+        "connection_type": "welded with holes",
+        "bolts": [],
+        "plates": [],
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 85
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 22,
+    "drawing_number": "C1136 022X",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "022X",
+        "member_type": "channel",
+        "section": "150x75PFC",
+        "quantity": 1,
+        "length_mm": 3150,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      },
+      {
+        "mark": "PL034",
+        "member_type": "flat plate",
+        "section": "130x10FL",
+        "quantity": 4,
+        "length_mm": 68,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 95
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "022X",
+          "PL034"
+        ],
+        "connection_type": "welded",
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 90
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 23,
+    "drawing_number": "023x",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "023x",
+        "member_type": null,
+        "section": "200UB25",
+        "quantity": 1,
+        "length_mm": 3722,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "023x"
+        ],
+        "connection_type": "bolted and welded",
+        "bolts": [
+          {
+            "quantity": null,
+            "size": "18mm diameter holes",
+            "grade": null
+          }
+        ],
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": null,
+        "confidence": 82
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 24,
+    "drawing_number": "024x",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "024x",
+        "member_type": "beam",
+        "section": "200UB25",
+        "quantity": 1,
+        "length_mm": 2249,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "024x"
+        ],
+        "connection_type": "welded/bolted",
+        "bolts": [
+          {
+            "quantity": null,
+            "size": "18mm dia holes",
+            "grade": null
+          }
+        ],
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": "300",
+        "confidence": 82
+      }
+    ],
+    "parse_failed": false
+  },
+  {
+    "page_number": 25,
+    "drawing_number": "025x",
+    "drawing_title": "Urban Fabrication",
+    "revision": "A",
+    "raw_members": [
+      {
+        "mark": "025x",
+        "member_type": "beam",
+        "section": "200UB25",
+        "quantity": 1,
+        "length_mm": 3431,
+        "grid_reference": null,
+        "detail_reference": null,
+        "confidence": 97
+      }
+    ],
+    "raw_connections": [
+      {
+        "detail_reference": null,
+        "grid_reference": null,
+        "connects_members": [
+          "025x"
+        ],
+        "connection_type": "welded",
+        "bolts": [],
+        "plates": [],
+        "welds": [
+          {
+            "type": "fillet",
+            "size_mm": 6
+          }
+        ],
+        "material": null,
+        "confidence": 82
+      }
+    ],
+    "parse_failed": false
+  }
+]
