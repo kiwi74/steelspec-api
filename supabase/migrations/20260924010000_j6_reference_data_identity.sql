@@ -1,0 +1,76 @@
+-- Milestone J6 — production reference-data identity persistence.
+--
+-- WHY: app/engineering_data/section_matcher.py has always recorded WHICH
+-- reference dataset a matcher consulted — LIVE_SUPABASE / UNVERSIONED, plus a
+-- deterministic sha256 digest of the steel_sections rows that matcher actually
+-- loaded. The normal production path (app/pipeline.py, app/drawing_reading/
+-- dxf_parser.py) then discarded that object with the matcher, so a persisted
+-- member row could not say which catalogue snapshot its section was resolved
+-- against. The digest is a CONTENT FINGERPRINT of an UNVERSIONED live table
+-- whose content can change between runs, so once the row is written the
+-- question is unanswerable unless it was recorded at the time.
+--
+-- WHAT: the one nullable column that identity needs. Nothing else.
+--
+-- PROPERTIES (all required):
+--   * additive            - one ADD COLUMN statement, no other clause
+--   * nullable            - no NOT NULL, so every legacy row is representable
+--   * no default          - deliberately NO DEFAULT. A default (or any backfill,
+--                           startup fill, or fallback-to-current-catalogue
+--                           behaviour) would invent an identity for the 128 rows
+--                           written before J6 and assert they were resolved
+--                           against a snapshot they never saw. Those rows keep
+--                           NULL and read as "not recorded".
+--   * jsonb               - carries the whole identity in one column, in the
+--                           shape the accepted CAD/proof chain already uses
+--                           (app/cad_engine/automation_pipeline.py's
+--                           reference_data_projection, pinned by
+--                           fabricator_acceptance._REFERENCE_DATA_KEYS).
+--                           Keeping the three keys together is what makes
+--                           "no identity was recorded" (NULL) a different
+--                           persisted value from a recorded UNVERSIONED
+--                           identity, which a bare digest column could not do.
+--   * backward-compatible - existing inserts that do not name this column are
+--                           unaffected; it is NULL for them.
+--   * non-destructive     - no DROP, no ALTER COLUMN, no data movement
+--   * no constraint/index - no FK, no CHECK, no enum, no index, no trigger and
+--                           no generated expression: the value is always read
+--                           with its own row and is never a filter predicate,
+--                           and the shape is already enforced in code by
+--                           ReferenceIdentity.__post_init__ (closed
+--                           vocabularies + a lowercase sha256 hex digest)
+--   * metadata only       - nothing may read this column to decide a member's
+--                           section, geometry, weight, quantity or review state
+--
+-- SHAPE (written verbatim by the matcher's own projection, never reconstructed
+-- downstream, and never recomputed from a later catalogue read):
+--   {"source_kind": "LIVE_SUPABASE",
+--    "identity_status": "UNVERSIONED",
+--    "reference_data_digest": "<64 lowercase hex>"}
+--
+-- NULL means "no reference identity was recorded for this row" — a permanent,
+-- honest statement about the 128 pre-J6 rows, not a gap to fill.
+--
+-- EXECUTION STATE — CORRECTED BY J8B PHASE 13, WHICH FOUND THIS CLAIM STALE.
+--
+-- As authored, this file was NOT EXECUTED, and the J6 implementation task did not
+-- apply it: applying it was a separate, credentialed operator decision. That
+-- decision was taken, and the column is now LIVE.
+--
+-- VERIFIED READ-ONLY ON 2026-09-24: information_schema reports
+-- `steel_members.reference_data_identity` present as jsonb, and the J6 production
+-- tests read it from the live table rather than assuming it. So the sentence
+-- "not applied to the live database" is no longer a true statement about the
+-- CURRENT state, and is superseded by this note; the authored state above is
+-- retained because it is still part of the record.
+--
+-- WHAT REMAINS TRUE AND IS NOT CLAIMED OTHERWISE: no migration RUNNER executed
+-- this file. It was applied out of band — there is no runner history for it, no
+-- migration tracking table records it, and this header claims no mechanism beyond
+-- "the change is live". The DDL below is retained verbatim as the authoritative
+-- statement of what the change is. RE-APPLYING IT IS NOT INTENDED: the column
+-- exists, the 128 pre-J6 rows correctly hold NULL, and `add column if not
+-- exists` makes a re-run a no-op rather than a repair.
+
+alter table steel_members
+    add column if not exists reference_data_identity jsonb;

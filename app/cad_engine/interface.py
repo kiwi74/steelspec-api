@@ -364,15 +364,26 @@ def generate_geometry(
             "matched against the steel_sections table before geometry can be generated."
         )
 
-    family = member.section_properties.get("family")
-    if family not in sections.PROFILE_BUILDERS:
+    # THE CAD FAMILY ADMISSION BOUNDARY (Milestone J1). `source_family` is the
+    # AUTHORITATIVE catalogue family, carried on the matched steel_sections row
+    # and never rewritten. `cad_family` is this engine's own derived vocabulary
+    # for building a profile, obtained from the ONE explicit table in
+    # app/cad_engine/sections.py (CAD_FAMILY_PROJECTION / cad_family_for()) —
+    # never from the section name, never from a builder-availability search,
+    # and never from the caller: there is deliberately no cad_family parameter
+    # on ValidatedSteelMember for a caller to set. The only thing that admits a
+    # family here is its authoritative source value.
+    source_family = member.section_properties.get("family")
+    cad_family = sections.cad_family_for(source_family)
+    if cad_family is None:
         raise UnsupportedSectionFamilyError(
-            f"Member '{member.mark}' has section family '{family}', which has no "
+            f"Member '{member.mark}' has section family '{source_family}', which has no "
             f"supported geometry builder yet. Supported families: "
-            f"{sorted(sections.PROFILE_BUILDERS)}."
+            f"{sorted(sections.PROFILE_BUILDERS)}; source families projected onto them: "
+            f"{sorted(sections.CAD_FAMILY_PROJECTION)}."
         )
 
-    profile = sections.PROFILE_BUILDERS[family](member.section_properties, member.mark)
+    profile = sections.PROFILE_BUILDERS[cad_family](member.section_properties, member.mark)
     solid = profile.extrude(member.length_mm)
 
     hardware: list[Any] = []
@@ -410,7 +421,14 @@ def generate_geometry(
     return GeneratedMemberGeometry(
         mark=member.mark,
         section_name=member.section,
-        section_family=family,
+        # The AUTHORITATIVE source family — not the CAD family the profile was
+        # built with. A flat bar admitted through the FLAT -> FL projection is
+        # still reported as "FLAT", because that is what the catalogue, the
+        # drawing and steel_members.section_family all say this member is. The
+        # CAD family is an internal construction detail (see sections.py), and
+        # reporting it here instead would silently replace the reference
+        # vocabulary with the engine's own.
+        section_family=source_family,
         length_mm=member.length_mm,
         solid=solid,
         connection_count=len(resolved_connections),

@@ -122,6 +122,9 @@ __all__ = [
     "PIPELINE_STAGE_ASSEMBLY", "PIPELINE_STAGE_VALIDATION",
     "PIPELINE_STAGE_MULTI_ASSEMBLY", "PIPELINE_STAGE_MULTI_VALIDATION", "PIPELINE_STAGES",
     "PIPELINE_GAP_ERROR_CODE",
+    "REFERENCE_SOURCE_LIVE_SUPABASE", "REFERENCE_SOURCE_KINDS",
+    "REFERENCE_IDENTITY_UNVERSIONED", "REFERENCE_IDENTITY_STATUSES",
+    "ReferenceDataIdentity", "capture_reference_identity", "reference_data_projection",
     "AutomationValidationFailure", "AutomationPipelineResult",
     "evaluate_reviewed_connection_for_automation",
 ]
@@ -150,6 +153,141 @@ PIPELINE_STAGES = (
 # error_code for the two 7AA_* stages: an input-context gap in THIS pipeline's call, never an
 # engineering finding about the connection itself.
 PIPELINE_GAP_ERROR_CODE = "AUTOMATION_PIPELINE_INPUT_GAP"
+
+# ---------------------------------------------------------------------------
+# Reference-data identity — the CAD chain's own record of WHICH reference
+# dataset a run's section lookups consulted, and whether that dataset is
+# formally versioned. This is provenance OF THE REFERENCE DATA, never of a
+# member and never a section decision: nothing in this module, and nothing
+# downstream, may read it when deciding what a token means.
+#
+# The vocabulary is a closed set of plain constants, the same convention as
+# the matcher's own RESOLUTION_*/SOURCE_*/IDENTITY_* sets: no ranking, no
+# default, and an unrecognised value cannot be constructed. The two spellings
+# below are COPIED from app/engineering_data/section_matcher.py, deliberately
+# not imported — that module reaches app.supabase_client -> app.config, which
+# reads os.environ at import time, so importing it would make every CAD module
+# unusable without a configured environment (the same reason
+# real_member_adapter.py copies RESOLUTION_EXACT). tests/
+# test_real_world_reference_identity_persistence.py asserts the two spellings
+# are the same value, so they cannot drift apart silently.
+# ---------------------------------------------------------------------------
+REFERENCE_SOURCE_LIVE_SUPABASE = "LIVE_SUPABASE"
+REFERENCE_SOURCE_KINDS = (REFERENCE_SOURCE_LIVE_SUPABASE,)
+
+# The FORMAL status of the dataset. The live steel_sections table has never had
+# a catalogue version declared for it, and no content digest makes one exist, so
+# UNVERSIONED is the only status there is today. A formally versioned dataset
+# would be a NEW status added here together with the field that carries its
+# version — never a value smuggled into this one.
+REFERENCE_IDENTITY_UNVERSIONED = "UNVERSIONED"
+REFERENCE_IDENTITY_STATUSES = (REFERENCE_IDENTITY_UNVERSIONED,)
+
+
+def _is_sha256_hex(value) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(c in "0123456789abcdef" for c in value)
+    )
+
+
+@dataclass(frozen=True)
+class ReferenceDataIdentity:
+    """
+    WHICH reference dataset a run consulted, in this chain's own words.
+
+    `source_kind`  REFERENCE_SOURCE_LIVE_SUPABASE today.
+
+    `identity_status`  the FORMAL status of that dataset:
+        REFERENCE_IDENTITY_UNVERSIONED — no catalogue version has been
+        declared for it. This is a complete, honest statement, and it is the
+        reason this record exists: it is what keeps "provenance exists and the
+        source is formally unversioned" (this record, with this status) from
+        being the same value as "no reference provenance exists" (no record at
+        all — `None`).
+
+    `reference_data_digest`  the digest of the exact reference rows the
+        matcher observed. A CONTENT FINGERPRINT, not a version, not an
+        approval, and never to be called a catalogue version. Kept in its own
+        field so stable content can never be mistaken for a declared version.
+        None means no digest was recorded, which is not the same as UNVERSIONED.
+
+    Frozen, and with no methods: a value to be read, never something that can
+    be called to change a decision.
+    """
+    source_kind: str
+    identity_status: str
+    reference_data_digest: str | None = None
+
+    def __post_init__(self):
+        if self.source_kind not in REFERENCE_SOURCE_KINDS:
+            raise ValueError(
+                f"source_kind must be exactly one of {list(REFERENCE_SOURCE_KINDS)} "
+                f"(got {self.source_kind!r}); there is no default source and no reference "
+                "dataset this chain does not know may be recorded."
+            )
+        if self.identity_status not in REFERENCE_IDENTITY_STATUSES:
+            raise ValueError(
+                f"identity_status must be exactly one of {list(REFERENCE_IDENTITY_STATUSES)} "
+                f"(got {self.identity_status!r}). A declared catalogue version is a new status "
+                "added to REFERENCE_IDENTITY_STATUSES together with the field that carries it — "
+                "never a value smuggled into an existing status, and never a digest standing in "
+                "for a version."
+            )
+        if self.reference_data_digest is not None and not _is_sha256_hex(self.reference_data_digest):
+            raise ValueError(
+                "reference_data_digest must be a lowercase sha256 hex digest "
+                f"(got {self.reference_data_digest!r})."
+            )
+
+
+def capture_reference_identity(section_matcher: object) -> ReferenceDataIdentity | None:
+    """
+    The reference identity the supplied section matcher declares, as this
+    chain's own frozen record — or None when the matcher declares none.
+
+    THIS IS THE SMALLEST UPSTREAM EXTENSION, and it happens exactly here,
+    where the genuine matcher is still in hand: the three values are read
+    verbatim from the matcher's own identity object and never reconstructed
+    from a digest string anywhere downstream. A matcher that declares no
+    `reference_identity` (the local in-process catalogue, a fake, or no
+    matcher at all) yields None — absence is recorded as absence, never filled
+    in with a default identity.
+
+    A declared identity this chain cannot honestly record — an unknown
+    source_kind or identity_status, or a malformed digest — raises, because
+    silently dropping it would report "no provenance" for a run that has some,
+    and silently accepting it would put a value in the deliverable that the
+    chain does not understand.
+    """
+    identity = getattr(section_matcher, "reference_identity", None)
+    if identity is None:
+        return None
+    return ReferenceDataIdentity(
+        source_kind=getattr(identity, "source_kind", None),
+        identity_status=getattr(identity, "identity_status", None),
+        reference_data_digest=getattr(identity, "reference_data_digest", None),
+    )
+
+
+def reference_data_projection(identity: ReferenceDataIdentity | None) -> dict | None:
+    """
+    The deterministic serialisable projection of a recorded reference identity,
+    or None when no identity was recorded. The one projection used by every
+    downstream manifest, so the deliverable's shape cannot drift from one
+    stage to the next.
+
+    None means NO IDENTITY WAS RECORDED. A recorded UNVERSIONED identity is a
+    dict carrying that status, so the two are never the same JSON value.
+    """
+    if identity is None:
+        return None
+    return {
+        "source_kind": identity.source_kind,
+        "identity_status": identity.identity_status,
+        "reference_data_digest": identity.reference_data_digest,
+    }
 
 
 @dataclass(frozen=True)
@@ -187,6 +325,14 @@ class AutomationPipelineResult:
     were resolved from, recorded here so the 7AF drawing manifest can
     identify it. It is NEVER derived from the AI extraction evidence
     and never touches any evidence digest.
+    `reference_identity` is the supplied matcher's own declared reference
+    identity (source kind, formal identity status and the digest of the rows it
+    loaded — see ReferenceDataIdentity), carried verbatim so the whole
+    downstream chain can state WHICH reference data a delivered drawing was
+    generated from. It is None when the matcher declares none, which is
+    recorded as absence and never filled in. It is provenance of the reference
+    data only: it decides no section, and no later stage may recompute it or
+    present the digest as a catalogue version.
     """
     automation_gate_result: AutomationGateResult
     validation_passed: bool
@@ -197,6 +343,7 @@ class AutomationPipelineResult:
     )
     specification: ReviewedConnectionSpecification
     catalogue_version: str | None = None
+    reference_identity: ReferenceDataIdentity | None = None
 
 
 def _attempt(stage: str, function):
@@ -255,7 +402,12 @@ def evaluate_reviewed_connection_for_automation(
     When the supplied matcher declares a `catalogue_version` attribute
     (the local section catalogue does), that value is recorded on the
     result's `catalogue_version` field — never invented, never read
-    from anywhere else.
+    from anywhere else. Likewise, when it declares a
+    `reference_identity` (the live Supabase matcher does), that identity
+    is recorded on `reference_identity` for the downstream chain — read
+    from the matcher's own object at this one seam, never reconstructed
+    from a digest string later, and absent when the matcher declares
+    none.
     """
     if not isinstance(package, ConnectionReviewPackage):
         raise TypeError(
@@ -268,6 +420,11 @@ def evaluate_reviewed_connection_for_automation(
     # a fake, a live Supabase matcher, or a missing matcher all yield None
     # honestly; the pipeline never substitutes a version of its own.
     catalogue_version = getattr(section_matcher, "catalogue_version", None)
+    # Reference-data provenance: the supplied matcher's OWN declared identity,
+    # read once here (the only place the matcher is in hand) and carried
+    # unchanged. A matcher that declares none yields None — the pipeline never
+    # invents a source, and never derives one from the digest.
+    reference_identity = capture_reference_identity(section_matcher)
 
     def conclude(passed, *, failure=None, assembly=None, validation_result=None):
         gate_result = evaluate_automation_gate(
@@ -281,6 +438,7 @@ def evaluate_reviewed_connection_for_automation(
             reviewed_assembly=assembly,
             specification=specification,
             catalogue_version=catalogue_version,
+            reference_identity=reference_identity,
         )
 
     # 2. Existing adapters, unchanged. Missing plate/hole/location data stays missing: the record

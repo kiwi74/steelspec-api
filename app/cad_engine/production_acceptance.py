@@ -58,6 +58,7 @@ from pathlib import Path
 import hashlib
 
 from app.cad_engine.automation_gate import AUTOMATION_DECISION_AUTO
+from app.cad_engine.automation_pipeline import ReferenceDataIdentity
 from app.cad_engine.drawing_dispatch import OUTPUT_STATUS_GENERATED
 from app.cad_engine.drawing_output_verification import (
     VERIFICATION_STATUS_VERIFIED,
@@ -199,6 +200,14 @@ class ConnectionAcceptance:
     The artifact facts come from the 7AG manifest verbatim;
     `artifact_exists` is the one on-disk corroboration (None when no
     verification ran).
+    `reference_identity` is the reference-data identity the production
+    chain already recorded, taken from the most downstream stage that
+    carries it (7AG's verification manifest, else 7AF's dispatch
+    manifest, else 7AA's pipeline result) and never re-derived here —
+    acceptance RECORDS provenance, it never creates or reinterprets it.
+    None means no reference provenance was recorded at all, which stays
+    distinct from a recorded UNVERSIONED identity. Nothing in the
+    acceptance decision above reads it.
     """
     package_id: str
     connection_id: str | None
@@ -215,6 +224,7 @@ class ConnectionAcceptance:
     failures: tuple[ArtifactCheck, ...]
     failure_notes: tuple[str, ...]
     trace: AcceptanceTrace
+    reference_identity: ReferenceDataIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -379,6 +389,44 @@ def _build_trace(
     )
 
 
+def _recorded_reference_identity(record: ProjectConnectionRecord) -> tuple[
+    ReferenceDataIdentity | None, list[str],
+]:
+    """
+    The reference-data identity the chain ALREADY recorded for this connection,
+    taken from the most downstream stage that carries one, plus a finding for
+    every disagreement between the stages that recorded one.
+
+    Read here, never derived: acceptance does not create, complete or
+    reinterpret provenance. The stages copy 7AG <- 7AF <- 7AA verbatim, so
+    agreement is the genuine case; a disagreement means the recorded stage
+    evidence contradicts itself and is reported exactly like this module's
+    other projection-versus-record checks. An identity recorded by no stage
+    stays absent (None) — it is never filled in.
+    """
+    candidates = [
+        ("the 7AG artifact verification manifest", record.verification_result),
+        ("the 7AF drawing dispatch manifest", record.dispatch_result),
+        ("the 7AA automation pipeline result", record.pipeline),
+    ]
+    recorded = [
+        (name, stage.reference_identity)
+        for name, stage in candidates
+        if stage is not None and stage.reference_identity is not None
+    ]
+    if not recorded:
+        return None, []
+    first_name, first_identity = recorded[0]
+    findings = [
+        f"{name} records reference-data identity {identity!r} but {first_name} records "
+        f"{first_identity!r}; the recorded stage evidence contradicts itself about which "
+        "reference data this connection's output came from."
+        for name, identity in recorded[1:]
+        if identity != first_identity
+    ]
+    return first_identity, findings
+
+
 def _evaluate_connection(
     workflow: ProjectWorkflowState,
     connection: ProjectConnectionState,
@@ -393,6 +441,10 @@ def _evaluate_connection(
     gate = record.gate_result
     dispatch = record.dispatch_result
     verification = record.verification_result
+    # The provenance the chain already recorded — read, never created. It has
+    # no part in any decision below; it is carried into the acceptance record so
+    # the packaged deliverable can state it.
+    reference_identity, provenance_findings = _recorded_reference_identity(record)
 
     if rerun is None:
         # Never processed through 7AD: no automation, fabrication, drawing or
@@ -441,6 +493,7 @@ def _evaluate_connection(
             verified_artifact=None, artifact_exists=None, sha256=None, page_count=None,
             checks=(), failures=(), failure_notes=tuple(unresolved_findings[1:]),
             trace=trace,
+            reference_identity=reference_identity,
         )
 
     # ---- the visible projection must agree with its own recorded evidence ----
@@ -560,6 +613,10 @@ def _evaluate_connection(
 
     # ---- human-to-record traceability ----
     findings.extend(_traceability_findings(contract, rerun))
+    # ---- the recorded stage evidence must agree about its reference data ----
+    # Reported, never repaired: acceptance never creates provenance, and it
+    # never silently picks a winner between two contradictory records.
+    findings.extend(provenance_findings)
 
     accepted = not findings
     reason = (
@@ -583,6 +640,7 @@ def _evaluate_connection(
         failures=verification.failures if verification is not None else (),
         failure_notes=tuple(findings[1:]) if not accepted else (),
         trace=_build_trace(workflow, connection, contract, rerun),
+        reference_identity=reference_identity,
     )
 
 

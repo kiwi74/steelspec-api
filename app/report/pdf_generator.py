@@ -26,6 +26,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 
 from app.supabase_client import supabase
+from app.validation.dxf_drop_accounting import headline_from_warnings
 
 RUST = HexColor("#c4633a")
 RUST_LIGHT = HexColor("#d4722a")
@@ -75,7 +76,7 @@ def _styles():
     return styles
 
 
-def _draw_cover(canvas_obj, project: dict):
+def _draw_cover(canvas_obj, project: dict, reference_identity_text: str = ""):
     w, h = A4
     canvas_obj.saveState()
     canvas_obj.setFillColor(white)
@@ -191,6 +192,18 @@ def _draw_cover(canvas_obj, project: dict):
     canvas_obj.setFillColor(INK2)
     canvas_obj.setFont("Helvetica", 7.5)
     _wrap_text_canvas(canvas_obj, text, MARGIN + 5 * mm, disc_top - 6 * mm, w - 2 * MARGIN - 10 * mm, 7.5, "Helvetica", 10)
+
+    # Provenance metadata, subordinate to the disclaimer above it and inside the
+    # same block. Rendered from the STORED identities on the member rows this
+    # report read — never recomputed, never a fresh catalogue read.
+    if reference_identity_text:
+        canvas_obj.setFillColor(GREY)
+        canvas_obj.setFont("Helvetica", 6.5)
+        _wrap_text_canvas(
+            canvas_obj, reference_identity_text,
+            MARGIN + 5 * mm, disc_top - disc_height + 4 * mm,
+            w - 2 * MARGIN - 10 * mm, 6.5, "Helvetica", 8.5,
+        )
     canvas_obj.restoreState()
 
 
@@ -269,17 +282,171 @@ def _metric_card(value: str, label: str, styles, accent=RUST):
     return inner
 
 
-def _status_pill(confidence: str, styles):
-    needs_review = (confidence or "").lower() in ("low", "manual")
-    if needs_review:
-        return Paragraph(f'<font color="{_hex(AMBER)}"><b>&#9679;</b></font> <font color="{_hex(AMBER)}">Verify</font>', styles["CellText"])
-    return Paragraph(f'<font color="{_hex(GREEN)}"><b>&#10003;</b></font> <font color="{_hex(GREEN)}">Matched</font>', styles["CellText"])
+# === The section match status (Milestone J5) ===
+# Whether a member's section is settled is an ENGINEERING question, answered by
+# the section authority boundary and persisted as steel_members.section_resolution.
+# It is not a confidence question, so it is never computed from, and never
+# downgraded by, the AI extraction confidence — those are shown separately.
+#
+# Only an EXACT resolution asserts a match. A refused substitution and an
+# unresolved token are both shown as needing review, and a row whose resolution
+# was never recorded (any row written before J5, or any matcher that cannot
+# report one) gets a NEUTRAL review state: this report does not guess a match it
+# cannot evidence. No scoring, ranking or confidence value takes part.
+SECTION_STATUS_LABELS = {
+    "EXACT": ("Confirmed", GREEN, "&#10003;"),
+    "SUFFIX_FALLBACK": ("Substitution refused", AMBER, "&#9679;"),
+    "NONE": ("Unresolved", AMBER, "&#9679;"),
+}
+SECTION_STATUS_UNRECORDED = ("Review", GREY, "&#9679;")
+
+
+def _section_status_pill(resolution: str, styles):
+    """The ENGINEERING status of a member's section, from section_resolution."""
+    label, colour, glyph = SECTION_STATUS_LABELS.get(
+        resolution if isinstance(resolution, str) else None, SECTION_STATUS_UNRECORDED,
+    )
+    return Paragraph(
+        f'<font color="{_hex(colour)}"><b>{glyph}</b></font> '
+        f'<font color="{_hex(colour)}">{label}</font>',
+        styles["CellText"],
+    )
+
+
+def _confidence_pill(confidence: str, styles):
+    """The AI EXTRACTION confidence, on its own terms.
+
+    Deliberately makes no claim about the section: "Matched" and "Verify" were
+    section-authority words decided by extraction confidence, which is exactly
+    how an unmatched member came to be reported as matched. This only reports
+    how sure the reader was.
+    """
+    tier = (confidence or "").lower()
+    if tier == "low":
+        colour = AMBER
+    elif tier == "high":
+        colour = INK2
+    else:
+        colour = GREY
+    label = {"high": "High", "medium": "Medium", "low": "Low", "manual": "Manual"}.get(tier)
+    if label is None:
+        return Paragraph("-", styles["CellTextMono"])
+    return Paragraph(f'<font color="{_hex(colour)}">{label}</font>', styles["CellText"])
 
 
 def _type_pill(conn_type: str, styles):
     label = CONNECTION_TYPE_LABELS.get(conn_type, (conn_type or "Unspecified").title())
     color = RUST if "bolt" in (conn_type or "") else BLUE
     return Paragraph(f'<font color="{_hex(color)}"><b>{label}</b></font>', styles["CellText"])
+
+
+# ---------------------------------------------------------------------------
+# REFERENCE-DATA PROVENANCE (Milestone J6). Metadata, and only metadata.
+#
+# The report describes the identity records ALREADY STORED on the member rows
+# it read. It never constructs a SectionMatcher, never queries steel_sections
+# and never computes a digest — so it is structurally incapable of presenting
+# today's catalogue as the reference dataset a member was resolved against,
+# and incapable of inventing an identity for a row that recorded none.
+#
+# This line must not affect member matching, resolution, geometry, quantities,
+# weights, schedule rows, status pills, confidence or review decisions. It is
+# drawn on the cover only, inside the existing footer/disclaimer block.
+# ---------------------------------------------------------------------------
+
+IDENTITY_NOT_RECORDED_TEXT = (
+    "Reference data: no reference-data identity was recorded for the members in this schedule."
+)
+IDENTITY_MULTI_TEXT = (
+    "Reference data: this schedule spans more than one reference-data identity — "
+)
+IDENTITY_UNREADABLE_TEXT = (
+    "Reference data: identity records are present on {rows} of this schedule's member rows but "
+    "could not be read, so none are displayed."
+)
+
+# The three accepted keys, and the only shape this report will read. A stored
+# value that is anything else is reported as unreadable rather than partially
+# printed or silently treated as absent.
+_IDENTITY_KEYS = ("source_kind", "identity_status", "reference_data_digest")
+
+_UNREADABLE = object()
+
+
+def _stored_identity(value):
+    """
+    One member row's stored reference identity as its three accepted values, or
+    None when the row carries none, or `_UNREADABLE` when the row carries a
+    value this report cannot read.
+
+    NULL is the recorded absence: every row written before this column existed,
+    and every row written by a matcher that declared no identity, stores SQL
+    NULL, which reads back here as None and means "no identity was recorded for
+    this row" — not "an identity is present and unreadable". That distinction is
+    the whole point of persisting the absence, so it is drawn explicitly.
+
+    Read-only and total: it never raises and never fills anything in. The three
+    outcomes are kept distinct because collapsing them would be a claim — a
+    record that cannot be read is not the same as a record that is absent.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return _UNREADABLE
+    if set(value.keys()) != set(_IDENTITY_KEYS):
+        return _UNREADABLE
+    source_kind = value.get("source_kind")
+    identity_status = value.get("identity_status")
+    digest = value.get("reference_data_digest")
+    if not isinstance(source_kind, str) or not source_kind:
+        return _UNREADABLE
+    if not isinstance(identity_status, str) or not identity_status:
+        return _UNREADABLE
+    if not (
+        isinstance(digest, str)
+        and len(digest) == 64
+        and all(c in "0123456789abcdef" for c in digest)
+    ):
+        return _UNREADABLE
+    return (source_kind, identity_status, digest)
+
+
+def _reference_identity_provenance(members) -> str:
+    """
+    The report's provenance line, from the stored identities only.
+
+    CASE A — exactly one distinct recorded identity: render it, using its own
+             stored values.
+    CASE B — no member recorded an identity: say so neutrally. No digest is
+             invented and today's catalogue is never shown.
+    CASE C — more than one distinct recorded identity: say the schedule spans
+             more than one, and list every distinct stored digest, sorted. None
+             is selected and none is presented as current.
+
+    A row whose stored value is present but unreadable produces its own
+    statement instead — the report cannot honestly say "none was recorded" for
+    a row that has one, and will not print a value it did not store. This case
+    is unreachable from the production writer, which only ever stores the
+    projection's three keys.
+    """
+    records = set()
+    unreadable_rows = 0
+    for member in members:
+        parsed = _stored_identity((member or {}).get("reference_data_identity"))
+        if parsed is _UNREADABLE:
+            unreadable_rows += 1
+        elif parsed is not None:
+            records.add(parsed)
+
+    if unreadable_rows:
+        return IDENTITY_UNREADABLE_TEXT.format(rows=unreadable_rows)
+    if not records:
+        return IDENTITY_NOT_RECORDED_TEXT
+    if len(records) == 1:
+        source_kind, identity_status, digest = next(iter(records))
+        return f"Reference data: {source_kind} · {identity_status} · {digest}"
+    digests = sorted({digest for (_, _, digest) in records})
+    return IDENTITY_MULTI_TEXT + ", ".join(digests)
 
 
 def generate_report_pdf(project_id: str) -> bytes:
@@ -319,6 +486,26 @@ def generate_report_pdf(project_id: str) -> bytes:
     card_table = Table(cards, colWidths=[CONTENT_WIDTH / 4] * 4)
     card_table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story.append(card_table)
+
+    # A DXF SOURCE THAT DISCARDED EVIDENCE (Milestone J11). The four figures
+    # above count only what was extracted. When the DXF reader recorded that it
+    # did not extract something, the report says so HERE, beside those figures,
+    # so the totals cannot be read as a claim that the drawing was fully read.
+    # The detail — how many, and why — is in Data Quality Notes below, from the
+    # same accounting, which the DXF path now persists exactly as the PDF path
+    # persists its own warnings. No disclosure means nothing was discarded,
+    # never that nothing was checked.
+    dxf_disclosure = headline_from_warnings(project.get("warnings"))
+    if dxf_disclosure:
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph(
+            f"<b>Extraction not complete.</b> {dxf_disclosure} The figures above cover only "
+            "the members that were extracted. See Data Quality Notes for what was not "
+            "extracted, and why.",
+            ParagraphStyle("DXFAccounting", fontName="Helvetica", fontSize=9.5, textColor=GREY,
+                           leading=14, backColor=BG,
+                           borderPadding=(5 * mm, 5 * mm, 5 * mm, 5 * mm)),
+        ))
     story.append(Spacer(1, 10 * mm))
 
     story.append(Paragraph("SCHEDULE", styles["SectionLabel"]))
@@ -331,10 +518,12 @@ def generate_report_pdf(project_id: str) -> bytes:
     has_source_pages = any(m.get("source_page") for m in members)
     if has_source_pages:
         header = [Paragraph(h, styles["CellHeader"]) for h in
-                  ["Mark", "Section", "Length (mm)", "Qty", "Total (kg)", "Source", "Status"]]
+                  ["Mark", "Section", "Length (mm)", "Qty", "Total (kg)", "Source",
+                   "Section Status", "AI Confidence"]]
     else:
         header = [Paragraph(h, styles["CellHeader"]) for h in
-                  ["Mark", "Section", "Grade", "Length (mm)", "Qty", "kg/m", "Total (kg)", "Status"]]
+                  ["Mark", "Section", "Grade", "Length (mm)", "Qty", "kg/m", "Total (kg)",
+                   "Section Status", "AI Confidence"]]
     data = [header]
     for m in members:
         w = float(m.get("total_weight_kg") or 0)
@@ -350,7 +539,8 @@ def generate_report_pdf(project_id: str) -> bytes:
                 Paragraph(str(m.get("quantity") or 1), styles["CellTextMono"]),
                 Paragraph(f"{w:.1f}" if w else "-", styles["CellTextMono"]),
                 Paragraph(source, styles["CellTextMono"]),
-                _status_pill(m.get("confidence"), styles),
+                _section_status_pill(m.get("section_resolution"), styles),
+                _confidence_pill(m.get("confidence"), styles),
             ])
         else:
             data.append([
@@ -361,18 +551,19 @@ def generate_report_pdf(project_id: str) -> bytes:
                 Paragraph(str(m.get("quantity") or 1), styles["CellTextMono"]),
                 Paragraph(f'{m.get("weight_per_metre"):.1f}' if m.get("weight_per_metre") else "-", styles["CellTextMono"]),
                 Paragraph(f"{w:.1f}" if w else "-", styles["CellTextMono"]),
-                _status_pill(m.get("confidence"), styles),
+                _section_status_pill(m.get("section_resolution"), styles),
+                _confidence_pill(m.get("confidence"), styles),
             ])
 
     totals_row_len = len(header)
     blank_cells = [""] * (totals_row_len - 2)
     data.append(blank_cells + [Paragraph(f"<b>{total_weight_kg:.1f}</b>", styles["CellText"]), ""] if has_source_pages else
-                ["", "", "", "", "", "", Paragraph(f"<b>{total_weight_kg:.1f}</b>", styles["CellText"]), ""])
+                ["", "", "", "", "", "", Paragraph(f"<b>{total_weight_kg:.1f}</b>", styles["CellText"]), "", ""])
 
     if has_source_pages:
-        col_widths = [16 * mm, 30 * mm, 22 * mm, 12 * mm, 20 * mm, 26 * mm, 24 * mm]
+        col_widths = [15 * mm, 26 * mm, 19 * mm, 10 * mm, 17 * mm, 21 * mm, 26 * mm, 23 * mm]
     else:
-        col_widths = [16 * mm, 32 * mm, 18 * mm, 22 * mm, 12 * mm, 16 * mm, 20 * mm, 24 * mm]
+        col_widths = [14 * mm, 24 * mm, 14 * mm, 19 * mm, 10 * mm, 14 * mm, 17 * mm, 25 * mm, 22 * mm]
     story.append(_styled_table(data, col_widths, has_totals_row=True))
     story.append(Spacer(1, 4 * mm))
     story.append(Paragraph(
@@ -413,9 +604,16 @@ def generate_report_pdf(project_id: str) -> bytes:
     if warnings:
         story.append(Spacer(1, 6 * mm))
         story.append(Paragraph("DATA QUALITY NOTES", styles["SectionLabel"]))
+        # The wording is deliberately neutral about WHERE the note came from
+        # (Milestone J11): this list now carries the DXF reader's own drop
+        # accounting as well as the PDF path's validation findings, and the
+        # earlier "the validation system flagged" preamble would have been
+        # false for every DXF project — the reader records those, not the
+        # validation rules. What is true of both is kept: they are notes
+        # recorded during extraction, and they are not necessarily errors.
         story.append(Paragraph(
-            "The validation system flagged the following during extraction. These are not "
-            "necessarily errors, but should be reviewed before relying on this schedule:",
+            "The following was recorded during extraction. These are not necessarily "
+            "errors, but should be reviewed before relying on this schedule:",
             styles["SectionDesc"],
         ))
         for w in warnings:
@@ -425,7 +623,7 @@ def generate_report_pdf(project_id: str) -> bytes:
 
     def _on_page(canvas_obj, doc_obj):
         if doc_obj.page == 1:
-            _draw_cover(canvas_obj, project)
+            _draw_cover(canvas_obj, project, _reference_identity_provenance(members))
         else:
             _page_chrome(canvas_obj, doc_obj, project_name)
 

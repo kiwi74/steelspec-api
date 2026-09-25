@@ -579,11 +579,19 @@ class TestReviewUI:
 # =============================================================================
 RENDER_EXPECTED_IMPORTS = {
     "html", "app.cad_engine.exception_resolution", "app.cad_engine.review_view_model",
+    # J18: the page-exception surface renders a view model of its own, and the
+    # one action constant it maps to a control.
+    "app.cad_engine.page_exception_contract", "app.cad_engine.page_exception_view_model",
 }
 SESSION_EXPECTED_IMPORTS = {
     "json", "pathlib", "app.cad_engine.exception_resolution",
     "app.cad_engine.project_workflow", "app.cad_engine.review_contract",
     "app.cad_engine.review_view_model", "app.review_ui",
+    # J18: the page-exception contract + view model, and the two record readers
+    # that own the halves of the committed record. The pipeline is NOT here: the
+    # retry contract is injected, so this layer cannot contain a retry algorithm.
+    "app.cad_engine.page_exception_contract", "app.cad_engine.page_exception_view_model",
+    "app.validation.page_coverage", "app.validation.parse_failures",
 }
 WEB_EXPECTED_IMPORTS = {"fastapi", "fastapi.responses", "app.review_ui"}
 
@@ -646,6 +654,14 @@ def test_render_layer_import_purity():
         "_extracted_items", "_output_section", "_chip", "_stat",
         "_project_action_controls", "_labelled", "_text_input", "_textarea",
         "_esc", "_esc_attr", "_page",
+        # J25's atoms: the provenance rows and evidence card shared with the connection
+        # detail page, and the read-only connection section the review page repeats.
+        "_provenance_rows", "_evidence_block", "_review_section", "_review_sections",
+        # J18's page-exception atoms.
+        "_page_exception_notice", "_page_exception_card",
+        # J19's back link: it names the surface's own root, which is "/" unless a
+        # mounted production surface is the one rendering.
+        "_backlink",
         "isinstance", "len", "str", "tuple", "frozenset",
     }
     outside = _called_names(path) - allowed

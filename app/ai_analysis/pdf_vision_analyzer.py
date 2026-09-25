@@ -25,6 +25,7 @@ from io import BytesIO
 
 from pdf2image import convert_from_path
 from anthropic import Anthropic
+from pypdf import PdfReader
 
 from app.config import ANTHROPIC_API_KEY, PDF_VISION_MODEL
 from app.engineering_data.repository import upload_page_image
@@ -120,9 +121,33 @@ def render_pages_to_png(filepath: str, max_pages: int, *, first_page: int = 1) -
     return pages
 
 
+def page_count_of(filepath: str) -> int | None:
+    """How many pages the PDF document itself contains, or None.
+
+    Milestone J15. This is the drawing set's own page count, read from the
+    document — NOT the number of pages a run chose to render, and not the
+    number it managed to analyse. `render_pages_to_png` above is capped by
+    MAX_PDF_PAGES and silently returns fewer images when the document is
+    longer than the cap, so the count of rendered pages cannot answer "was the
+    whole drawing set read?" Only the document can.
+
+    Deliberately total and fail-closed: an unreadable, encrypted, truncated or
+    absent file returns None rather than raising. A page count that could not
+    be established is a real answer — it is the answer "coverage cannot be
+    proven" — and must not be allowed to abort an extraction whose pages were
+    read successfully, nor to be replaced by a count that is merely available.
+    """
+    try:
+        reader = PdfReader(filepath)
+        count = len(reader.pages)
+    except Exception:
+        return None
+    return count if count > 0 else None
+
+
 def analyze_pdf_pages(
     filepath: str, user_id: str, project_id: str, drawing_id: str, max_pages: int,
-    *, first_page: int = 1,
+    *, first_page: int = 1, store_page_image: bool = True,
 ) -> list[PageExtraction]:
     """
     Renders the pages, asks Claude what it sees, and returns the raw
@@ -132,6 +157,15 @@ def analyze_pdf_pages(
     page numbers. No matching, no validation, no database writes
     to engineering-data tables (page images ARE persisted here, since
     that's source-of-truth storage, not an engineering interpretation).
+
+    `store_page_image=False` reads the pages without storing them again, for a
+    caller that is re-reading pages it has already rendered and stored once
+    (Milestone J17's single-page retry of a page whose response could not be
+    parsed). This function stores each page's image BEFORE it asks the model
+    about it, so every page it has ever analysed — a parse failure included —
+    already has its stored image; storing it a second time would record one page
+    of one drawing twice. The default keeps every existing caller's behaviour
+    exactly as it was.
     """
     if not ANTHROPIC_API_KEY:
         raise RuntimeError(
@@ -147,7 +181,8 @@ def analyze_pdf_pages(
     results: list[PageExtraction] = []
 
     for page_num, page_bytes in enumerate(pages, start=first_page):
-        upload_page_image(user_id, project_id, drawing_id, page_num, page_bytes)
+        if store_page_image:
+            upload_page_image(user_id, project_id, drawing_id, page_num, page_bytes)
 
         b64_image = base64.standard_b64encode(page_bytes).decode("utf-8")
         response = client.messages.create(

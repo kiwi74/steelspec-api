@@ -88,6 +88,7 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
+from app.cad_engine.automation_pipeline import ReferenceDataIdentity
 from app.cad_engine.drawing_dispatch import (
     OUTPUT_STATUS_BLOCKED_CONFIRMATION,
     OUTPUT_STATUS_BLOCKED_REVIEW,
@@ -219,6 +220,12 @@ class ArtifactVerificationResult:
     when an artifact was actually located — its recorded path, format,
     size, SHA-256 identity and page count, plus every executed check.
     `failures` is derived from `checks`, never asserted.
+    `reference_identity` is the genuine 7AF dispatch manifest's own
+    reference-data identity, carried through unchanged (None exactly
+    when the dispatch recorded none) — this stage preserves it and never
+    recomputes it from anywhere else. It describes the REFERENCE DATA a
+    run consulted; it is not part of artifact verification, and no
+    verification outcome above depends on it.
     """
     connection_id: str | None
     dispatch_output_status: str
@@ -231,6 +238,7 @@ class ArtifactVerificationResult:
     checks: tuple[ArtifactCheck, ...]
     failures: tuple[ArtifactCheck, ...]
     summary: tuple[str, ...]
+    reference_identity: ReferenceDataIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -293,6 +301,7 @@ def _no_artifact_result(dispatch_result: DrawingDispatchResult, explanation: str
             f"dispatch_output_status = {dispatch_result.output_status}",
             explanation,
         ),
+        reference_identity=dispatch_result.reference_identity,
     )
 
 
@@ -400,6 +409,7 @@ def _artifact_result(
         checks=checks,
         failures=tuple(check for check in checks if check.status == CHECK_FAILED),
         summary=tuple(summary_lines),
+        reference_identity=dispatch_result.reference_identity,
     )
 
 

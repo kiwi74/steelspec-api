@@ -21,6 +21,14 @@ flat-plate approximation. The field-presence check is shared via
 _require_fields(); the actual profile shape (and each family's own
 geometric sanity check) is not, and stays in each builder.
 
+SOURCE FAMILY vs CAD FAMILY (Milestone J1): the catalogue's family
+vocabulary and this module's are not the same one. `steel_sections.family`
+is authoritative and stores a flat bar as "FLAT"; PROFILE_BUILDERS above
+is the CAD vocabulary and spells it "FL". CAD_FAMILY_PROJECTION — one
+entry only, "FLAT" -> "FL" — plus cad_family_for() is the single,
+explicit, fail-closed boundary between them. The source family is never renamed:
+see the block above CAD_FAMILY_PROJECTION.
+
 HOLLOW SECTIONS (SHS, RHS): a genuine hollow profile — not a solid
 bar — is built from two nested closed wires (outer boundary, inner
 boundary) on one Workplane. CadQuery/OCCT's extrude() automatically
@@ -36,6 +44,9 @@ both thin wrappers over the one shared
 build_hollow_rectangular_profile() — RHS is not a second, parallel
 hollow-section implementation.
 """
+from types import MappingProxyType
+from typing import Any, Mapping
+
 import cadquery as cq
 
 from app.cad_engine.errors import GeometryValidationError
@@ -282,3 +293,64 @@ PROFILE_BUILDERS = {
     "FL": build_plate_profile,
     "EA": build_ea_profile,
 }
+
+# ---------------------------------------------------------------------------
+# SOURCE FAMILY -> CAD FAMILY ADMISSION (Milestone J1)
+#
+# The section CATALOGUE and the CAD ENGINE are two different vocabularies.
+# `steel_sections.family` is the AUTHORITATIVE source family: a PostgreSQL
+# ENUM (public.section_family) whose flat-bar value is "FLAT" — the value
+# every live plate row actually carries, and the only one the database
+# permits for it ("FL" and "PL" are rejected by the enum; see
+# tests/test_real_world_live_schema_establishment.py). This module's
+# PROFILE_BUILDERS above is the CAD vocabulary, which spells that same
+# family "FL".
+#
+# The single explicit table below is the whole of the mapping between them.
+#
+# It holds exactly ONE entry, and that narrowness is the point. This is
+# NOT a "closest supported family" fallback, NOT a section-name or
+# name-suffix rule, NOT a geometry-similarity guess, and NOT a
+# builder-availability search — activating it requires one thing only:
+# the authoritative source family value. Adding a second entry, or mapping
+# "PL" (which shares the plate builder today) or any other family, is a
+# separate accepted milestone with its own evidence, never an edit made in
+# passing.
+#
+# The source family is never renamed by this table. Nothing here mutates a
+# catalogue row, and an admitted member keeps reporting the authoritative
+# source family it came in with — see cad_family_for() below and
+# interface.generate_geometry()'s section_family.
+# ---------------------------------------------------------------------------
+CAD_FAMILY_PROJECTION: Mapping[str, str] = MappingProxyType({"FLAT": "FL"})
+
+
+def cad_family_for(source_family: Any) -> str | None:
+    """
+    The CAD geometry family an AUTHORITATIVE source family is admissible
+    as, or None when this engine has no geometry builder for it.
+
+      - a source family named in CAD_FAMILY_PROJECTION ("FLAT") is
+        admitted as its one explicit CAD entry ("FL");
+      - a source family this engine already supports is its own CAD
+        family — plain identity, exactly what PROFILE_BUILDERS[family]
+        already did for every currently-supported family;
+      - everything else returns None, i.e. refuses: an unsupported
+        family, an unknown family, a missing/None family, a non-string
+        value. Nothing is guessed, no similar family is substituted, and
+        the section name is never consulted.
+
+    Total and fail-closed by construction. It returns a decision rather
+    than raising so each caller keeps its own refusal vocabulary and
+    error type (interface.generate_geometry() raises
+    UnsupportedSectionFamilyError, real_member_adapter raises
+    GeometryValidationError) — the admission decision itself cannot
+    differ between them, because it is only ever made here.
+    """
+    if not isinstance(source_family, str):
+        return None
+    if source_family in CAD_FAMILY_PROJECTION:
+        return CAD_FAMILY_PROJECTION[source_family]
+    if source_family in PROFILE_BUILDERS:
+        return source_family
+    return None

@@ -280,7 +280,11 @@ def _synthetic_package(tmp_path, *, lines=None, decisions=None,
                      "acceptance_status": "ACCEPTED"}),
         ("drawings", [{"drawing_number": "STEELSPEC-SYN-001",
                        "connection_id": connection_id,
-                       "filename": "STEELSPEC-SYN-001.pdf"}]),
+                       "filename": "STEELSPEC-SYN-001.pdf",
+                       # The synthetic drawing was not generated from any reference
+                       # dataset, so its provenance is explicitly absent — the same
+                       # shape 7AR's projection produces for such an item.
+                       "reference_data": None}]),
         ("summary", {"final_package_status": "READY", "total_drawing_artifacts": 1}),
         ("issues", []),
     )

@@ -521,6 +521,7 @@ def test_drawing_output_verification_module_imports_are_pure():
             imported.add(node.module)
 
     assert imported == {
+        "app.cad_engine.automation_pipeline",         # the reference-data identity type only (7AA)
         "app.cad_engine.drawing_dispatch",           # the genuine 7AF manifest types/statuses only
         "app.cad_engine.multi_member_connection",    # the multi-member assembly type (7AV)
         "app.cad_engine.reviewed_connection_assembly",  # the genuine assembly type only

@@ -73,6 +73,10 @@ from pathlib import Path
 from pypdf import PdfReader
 
 from app.cad_engine.automation_gate import AUTOMATION_DECISION_AUTO
+from app.cad_engine.automation_pipeline import (
+    ReferenceDataIdentity,
+    reference_data_projection,
+)
 from app.cad_engine.drawing_dispatch import OUTPUT_STATUS_GENERATED
 from app.cad_engine.drawing_output_verification import CHECK_FAILED, VERIFICATION_STATUS_VERIFIED
 from app.cad_engine.multi_member_connection import MEMBER_LABEL_LETTERS, member_label
@@ -236,6 +240,11 @@ class FabricationPackageItem:
     drawing evidence and human decisions; `source_bytes` is the exact
     evaluated artifact content (the packaged copy is written from it,
     so it can never diverge from what was hashed and inspected).
+    `reference_data` is the reference-data identity the acceptance
+    recorded for THIS connection — carried verbatim, never recomputed
+    from the artifact or from any digest, and None exactly when the
+    acceptance recorded none. It belongs to the individual drawing
+    item, never to the project as a whole.
     """
     drawing_number: str
     connection_id: str
@@ -253,6 +262,7 @@ class FabricationPackageItem:
     audit: tuple[tuple[str, object], ...]
     packaged_path: str | None
     source_bytes: bytes | None = None
+    reference_data: ReferenceDataIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -457,6 +467,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_ACCEPTANCE_FIELDS_CONSISTENT, CHECK_PASSED,
@@ -483,6 +494,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     if not data:
         checks.append(_check(
@@ -499,6 +511,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_SOURCE_ARTIFACT_PRESENT, CHECK_PASSED,
@@ -523,6 +536,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_SOURCE_SHA256_MATCHES_RECORDED, CHECK_PASSED,
@@ -546,6 +560,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_RECORDED_CHECKS_PASSED, CHECK_PASSED,
@@ -570,6 +585,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_DISPATCH_IDENTITY_MATCHES_CONNECTION, CHECK_PASSED,
@@ -599,6 +615,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(CHECK_PDF_OPENS, CHECK_PASSED, "opened by the real PDF parser"))
 
@@ -618,6 +635,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_PAGE_COUNT_MATCHES_RECORDED, CHECK_PASSED, f"{observed_page_count} page(s)",
@@ -643,6 +661,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_DRAWING_NUMBER_PRESENT, CHECK_PASSED,
@@ -664,6 +683,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_CONNECTION_IDENTITY_PRESENT, CHECK_PASSED,
@@ -686,6 +706,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_TITLE_BLOCK_PRESENT, CHECK_PASSED,
@@ -749,6 +770,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_MEMBER_IDENTITIES_PRESENT, CHECK_PASSED,
@@ -803,6 +825,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(CHECK_NO_NONE_VALUES, CHECK_PASSED, "no bare None value in the artifact"))
 
@@ -823,6 +846,7 @@ def _evaluate_item(
             verification_status=conn.verification_status,
             dispatch_output_status=conn.output_status,
             checks=tuple(checks), observed=(), audit=(), packaged_path=None,
+            reference_data=conn.reference_identity,
         )
     checks.append(_check(
         CHECK_NO_CONTRADICTORY_CONNECTION_IDS, CHECK_PASSED,
@@ -844,6 +868,7 @@ def _evaluate_item(
         audit=_item_audit(conn),
         packaged_path=packaged_path,
         source_bytes=data,
+        reference_data=conn.reference_identity,
     )
 
 
@@ -1041,6 +1066,13 @@ def _manifest_projection(
             "dispatch_output_status": item.dispatch_output_status,
             "artifact_sha256": item.artifact_sha256,
             "recorded_sha256": item.recorded_sha256,
+            # The reference data THIS drawing was generated from, exactly as the
+            # acceptance recorded it. `reference_data_digest` is a content
+            # fingerprint of the reference rows the matcher loaded — never a
+            # catalogue version, and never named as one. null means no reference
+            # provenance was recorded for this connection, which stays distinct
+            # from a recorded identity_status of UNVERSIONED.
+            "reference_data": reference_data_projection(item.reference_data),
             "observed": dict(item.observed),
             "checks": [
                 {"code": check.code, "status": check.status, "detail": check.detail}

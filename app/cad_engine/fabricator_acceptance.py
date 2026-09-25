@@ -96,6 +96,11 @@ from app.cad_engine.exception_resolution import (
     TASK_SELECT_MEMBER_POSITION_ATTACHMENT,
     TASK_SELECT_POSITION,
 )
+from app.cad_engine.automation_pipeline import (
+    REFERENCE_IDENTITY_STATUSES,
+    REFERENCE_SOURCE_KINDS,
+    reference_data_projection,
+)
 from app.cad_engine.fabrication_package import (
     PACKAGE_STATUS_READY,
     FabricationDrawingPackage,
@@ -421,6 +426,120 @@ class FabricatorAcceptance:
 def _sha256_of_bytes(data: bytes) -> str:
     import hashlib
     return hashlib.sha256(data).hexdigest()
+
+
+_REFERENCE_DATA_KEYS = ("source_kind", "identity_status", "reference_data_digest")
+
+
+def _reference_data_problems(
+    recorded,
+    *,
+    source_kinds: tuple[str, ...] = REFERENCE_SOURCE_KINDS,
+    identity_statuses: tuple[str, ...] = REFERENCE_IDENTITY_STATUSES,
+) -> list[str]:
+    """
+    What is wrong with one manifest `reference_data` value, structurally — []
+    when nothing is.
+
+    This checks STRUCTURE, ALLOWED VOCABULARY and DIGEST FORMAT. It does not
+    check, and must never be read as checking, whether the named source is an
+    approved engineering catalogue: a provenance record is a statement about
+    which reference data was read, never a claim of engineering authority or
+    of any approval.
+    """
+    if recorded is None:
+        # Absence, stated explicitly: no reference provenance was recorded for
+        # this drawing. That is a complete value, not a defect.
+        return []
+    if not isinstance(recorded, dict):
+        return [f"the reference-data provenance is a {type(recorded).__name__}, not a record"]
+    problems = []
+    if tuple(recorded) != _REFERENCE_DATA_KEYS:
+        problems.append(
+            f"the reference-data provenance carries fields {sorted(recorded)} instead of "
+            f"exactly {list(_REFERENCE_DATA_KEYS)}"
+        )
+    if recorded.get("source_kind") not in source_kinds:
+        problems.append(
+            f"the reference-data source kind {recorded.get('source_kind')!r} is not one of "
+            f"{list(source_kinds)}"
+        )
+    if recorded.get("identity_status") not in identity_statuses:
+        problems.append(
+            f"the reference-data identity status {recorded.get('identity_status')!r} is not one "
+            f"of {list(identity_statuses)}"
+        )
+    digest = recorded.get("reference_data_digest")
+    if digest is not None and not (
+        isinstance(digest, str) and len(digest) == 64
+        and all(c in "0123456789abcdef" for c in digest)
+    ):
+        problems.append(
+            f"the reference-data digest {digest!r} is not a lowercase sha256 hex digest"
+        )
+    return problems
+
+
+def _reference_data_refusals(package: FabricationDrawingPackage) -> list[str]:
+    """
+    The deliverable's per-drawing reference-data provenance, held against the
+    package's OWN recorded evidence for that connection.
+
+    WHAT 7AS VERIFIES HERE: that every drawing entry in the manifest carries a
+    provenance record (or an explicit null), that the record uses only this
+    chain's vocabulary and a well-formed digest, and that it is EXACTLY what
+    the package recorded for that connection — so the manifest cannot claim a
+    different source, status or digest than the run it describes.
+
+    WHAT IT DOES NOT DO: recompute the digest from anywhere, re-read a
+    catalogue, or claim the named source is approved. This is provenance
+    integrity, not engineering authority — the engineering evidence remains the
+    artifact, the recorded checks and the reviewer's own answers.
+    """
+    manifest = dict(package.manifest)
+    drawings = manifest.get("drawings")
+    if not isinstance(drawings, list):
+        return [
+            "the package manifest records no drawings list; the reference-data provenance of "
+            "the deliverable cannot be verified",
+        ]
+    entries: dict[str, dict] = {}
+    for entry in drawings:
+        if isinstance(entry, dict) and isinstance(entry.get("drawing_number"), str):
+            entries[entry["drawing_number"]] = entry
+
+    refusals: list[str] = []
+    for item in package.items:
+        entry = entries.get(item.drawing_number)
+        if entry is None:
+            refusals.append(
+                f"the package manifest records no entry for drawing {item.drawing_number}; its "
+                "reference-data provenance cannot be verified"
+            )
+            continue
+        if "reference_data" not in entry:
+            refusals.append(
+                f"the package manifest records no reference-data provenance for drawing "
+                f"{item.drawing_number}; the deliverable does not state which reference data it "
+                "was generated from"
+            )
+            continue
+        recorded = entry["reference_data"]
+        problems = _reference_data_problems(recorded)
+        if problems:
+            refusals.append(
+                f"the reference-data provenance of drawing {item.drawing_number} is malformed: "
+                + "; ".join(problems) + "."
+            )
+            continue
+        expected = reference_data_projection(item.reference_data)
+        if recorded != expected:
+            refusals.append(
+                f"the manifest records reference-data provenance {recorded!r} for drawing "
+                f"{item.drawing_number} but the package recorded {expected!r}; a deliverable "
+                "claiming provenance the run did not record is refused, never evaluated"
+            )
+    return refusals
 
 
 def _format_dim(value) -> str:
@@ -919,6 +1038,15 @@ def evaluate_fabricator_acceptance(
             "the manifest on disk does not match the package's recorded projection — "
             "tampered package evidence is refused, never evaluated",
         ], expected_revision)
+
+    # ---- reference-data provenance in the deliverable. Independently checked
+    # ---- here: the manifest's per-drawing provenance must be well-formed, use
+    # ---- only this chain's vocabulary, and be exactly what the package
+    # ---- recorded for that connection. A failure is a refusal — never a
+    # ---- partial acceptance, and never a repair.
+    provenance_refusals = _reference_data_refusals(package)
+    if provenance_refusals:
+        return _refused(package, provenance_refusals, expected_revision)
 
     scanned: list[tuple[object, str, tuple[str, ...], dict, dict, dict]] = []
     identities: dict[str, set] = {"connection": set(), "drawing": set(), "source": set()}

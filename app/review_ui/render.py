@@ -27,6 +27,12 @@ HARD RULES:
     never rebuilt from codes; a blocker with no related task gets no link.
   - no bypass actions: the only rendered controls map to the view's own
     REVIEW / RESOLVE / REFRESH actions and nothing else.
+  - the page-exception surface (J18) renders one Retry control per unread page,
+    and ONLY for a page whose own view carries that action: there is no
+    project-level retry, no "retry all", and nothing on that page initiates
+    anything by being rendered. The retry result banner is green only when the
+    view's notice says J17 resolved the page, red when it says J17 did not, and
+    neutral when J17 said nothing — the state code is always printed.
   - deterministic: fixed markup, fixed field names, no generated ids, no
     timestamps, no randomness, order exactly as supplied by the view.
   - resolution input widgets are driven solely by each task's authoritative
@@ -53,6 +59,8 @@ from app.cad_engine.exception_resolution import (
     ANSWER_PLATE_VALUE,
     ANSWER_POSITION_VALUE,
 )
+from app.cad_engine.page_exception_contract import ACTION_RETRY_PAGE
+from app.cad_engine.page_exception_view_model import PageExceptionListView
 from app.cad_engine.review_view_model import (
     ACTION_REFRESH,
     ACTION_RESOLVE,
@@ -64,7 +72,8 @@ from app.cad_engine.review_view_model import (
 
 __all__ = [
     "SUPPORTED_ANSWER_TYPES", "render_connection_detail_page", "render_message_page",
-    "render_project_page", "render_unbound_page", "task_input_names", "unsupported_tasks",
+    "render_page_exceptions_page", "render_project_page", "render_unbound_page",
+    "render_workflow_review_page", "task_input_names", "unsupported_tasks",
 ]
 
 # The deliberately small set of answer payload types this vertical slice can
@@ -233,6 +242,9 @@ _CHIP_TONES = {
     "No artifact": "chip-error",
     "answered": "chip-verified",
     "unanswered": "chip-neutral",
+    # J25's action availability, which the composition decides and this layer only shows.
+    "AVAILABLE": "chip-verified",
+    "UNAVAILABLE": "chip-attention",
 }
 
 
@@ -534,6 +546,23 @@ def render_project_page(view: ProjectReviewView) -> str:
     return _page("SteelSpec review", body)
 
 
+def _provenance_rows(provenance):
+    """The view's own provenance entries as definition rows, in the view's order."""
+    return "".join(
+        f"<dt>{_esc(p.field)}</dt>"
+        f"<dd>{_esc(p.provenance)} ({_esc(p.provenance_label)})</dd>"
+        for p in provenance
+    )
+
+
+def _evidence_block(evidence):
+    """The drawing evidence the view carries, printed verbatim."""
+    return (
+        "<h2>Drawing evidence</h2>"
+        f'<div class="card"><p class="evidence">{_esc(evidence.evidence_text)}</p></div>'
+    )
+
+
 def render_connection_detail_page(project_view: ProjectReviewView, connection: ConnectionReviewView) -> str:
     """Renders one connection's review detail page from the view model alone,
     ordered for a human decision: identity, attention, output truth, evidence,
@@ -560,11 +589,7 @@ def render_connection_detail_page(project_view: ProjectReviewView, connection: C
             + "</section>"
         )
     output = _output_section(connection)
-    provenance_rows = "".join(
-        f"<dt>{_esc(p.field)}</dt>"
-        f"<dd>{_esc(p.provenance)} ({_esc(p.provenance_label)})</dd>"
-        for p in connection.provenance
-    )
+    provenance_rows = _provenance_rows(connection.provenance)
     tasks = connection.tasks
     actions = {action.action for action in connection.actions}
     unsupported = unsupported_tasks(connection)
@@ -617,34 +642,347 @@ def render_connection_detail_page(project_view: ProjectReviewView, connection: C
         f"<dt>Revision</dt><dd>{ident.revision}</dd>"
         "</dl>"
         "</header>"
-        f"{attention}"
-        f"{output}"
-        "<h2>Drawing evidence</h2>"
-        f'<div class="card"><p class="evidence">{_esc(connection.evidence.evidence_text)}</p></div>'
-        "<h2>AI-extracted values</h2>"
-        '<p class="note">Extracted observations from the drawing — not confirmed engineering facts.</p>'
-        f'<div class="card"><dl class="kv">{_extracted_items(connection.extracted)}</dl></div>'
-        "<h2>Provenance</h2>"
+        + f"{attention}"
+        + f"{output}"
+        + _evidence_block(connection.evidence)
+        + "<h2>AI-extracted values</h2>"
+        + '<p class="note">Extracted observations from the drawing — not confirmed engineering facts.</p>'
+        + f'<div class="card"><dl class="kv">{_extracted_items(connection.extracted)}</dl></div>'
+        + "<h2>Provenance</h2>"
         + (f'<div class="card"><dl class="kv">{provenance_rows}</dl></div>' if provenance_rows
            else '<div class="card"><p class="note">None recorded.</p></div>')
         + f"{resolution_area}"
-        "</main>"
+        + "</main>"
     )
     return _page(f"Connection {ident.package_id}", body)
 
 
 # --------------------------------------------------------------------------------------
+# The production connection-review page (J25) — one authorized project's review, composed
+# by `app/production_connection_review.py` and handed here as plain data.
+#
+# This layer escapes and arranges, and decides nothing: the identity, the coverage, the
+# recorded state, the queue and the availability of every action all arrive already
+# determined. There are no controls on this page and no form of any kind — each action the
+# views carry is listed with what the composition says can be done with it, and reviewing
+# is the reading the page already provides. The two bands (the reconstruction and the
+# recorded state) are rendered by the same atoms, so one cannot drift from the other.
+# --------------------------------------------------------------------------------------
+def _review_section(connection):
+    """One connection, read-only: what it is, why it needs attention, what was read for
+    it, and its tasks without inputs. Everything is the view's own — nothing recomputed."""
+    ident = connection.identity
+    ref = ident.display_reference or ident.package_id
+    task_by_type = {task.task_type: task.task_id for task in connection.tasks}
+    chips = " ".join(
+        _chip(label) for label in (
+            connection.decision_label,
+            connection.output.output_label,
+            connection.output.verification_label,
+        ) if label
+    )
+    provenance_rows = _provenance_rows(connection.provenance)
+    tasks = connection.tasks
+    return (
+        '<section class="card">'
+        f'<div class="head"><h3>{_esc(ref)}</h3>{_chip(connection.decision_label)}</div>'
+        f'<p class="line">{_esc(connection.summary)}</p>'
+        f'<p>{chips}</p>'
+        '<dl class="meta-list">'
+        f"<dt>Connection</dt><dd>{_esc(ident.connection_id) if ident.connection_id else '&mdash;'}</dd>"
+        f"<dt>Project</dt><dd>{_esc(ident.project_id) if ident.project_id else '&mdash;'}</dd>"
+        f"<dt>Revision</dt><dd>{ident.revision}</dd>"
+        "</dl>"
+        + _blocker_items(connection.blockers, task_by_type)
+        + _blocker_items(connection.warnings, {})
+        + _output_section(connection)
+        + _evidence_block(connection.evidence)
+        + "<h4>AI-extracted values</h4>"
+        + f'<div class="card"><dl class="kv">{_extracted_items(connection.extracted)}</dl></div>'
+        + "<h4>Provenance</h4>"
+        + (f'<div class="card"><dl class="kv">{provenance_rows}</dl></div>' if provenance_rows
+           else '<div class="card"><p class="note">None recorded.</p></div>')
+        + ("<h4>Resolution tasks (read-only)</h4>"
+           f'<ol class="tasks">{_task_sections(tasks, interactive=False)}</ol>'
+           if tasks else "")
+        + "</section>"
+    )
+
+
+def _review_sections(view):
+    """Every connection of one view, attention first — the view's own two groups, in the
+    view's own order within each. This function reorders nothing."""
+    parts = []
+    for connection in tuple(view.review_items) + tuple(view.completed_items):
+        parts.append(_review_section(connection))
+    return "".join(parts)
+
+
+def render_workflow_review_page(view, *, identity=(), coverage=(), capture_runs=(),
+                                persisted_code="", persisted_revisions=(), persisted_view=None,
+                                limitations=(), refusal_code="", refusal_detail="",
+                                action_prefix=""):
+    """One project's review as a page: identity, extraction coverage, the reconstructed
+    queue, what can and cannot be done, and the recorded state beside it.
+
+    `view` may be absent (the reconstruction refused); the recorded band is rendered
+    whatever the reconstruction did, and the absence of recorded state is stated with the
+    store's own code rather than filled in. Nothing here writes or reads.
+    """
+    if view is not None:
+        heading = view.project_id
+        masthead_meta = (
+            f'<p class="meta">Revision {view.revision} · Status {_chip(view.status_label)}</p>'
+        )
+        queue = (
+            "<h2>Connection review</h2>"
+            + (_review_sections(view) or '<p class="note">No connection was reconstructed.</p>')
+        )
+    else:
+        heading = persisted_view.project_id if persisted_view is not None else ""
+        masthead_meta = '<p class="meta">No reconstruction — see the refusal below.</p>'
+        queue = ""
+    refusal = (
+        '<section class="card attention-banner banner">'
+        '<div class="banner-label">Not reconstructed</div>'
+        f'<p class="big">{_esc(refusal_code)}</p>'
+        f"<p>{_esc(refusal_detail)}</p>"
+        "</section>"
+    ) if refusal_code else ""
+    identity_body = "".join(
+        f"<dt>{_esc(label)}</dt><dd>{_esc(value)}</dd>" for label, value in identity
+    )
+    coverage_body = "".join(
+        f"<dt>{_esc(label)}</dt><dd>{_esc(value)}</dd>" for label, value in coverage
+    )
+    runs = ", ".join(str(run) for run in capture_runs) if capture_runs else "(none)"
+    revisions = (
+        ", ".join(str(revision) for revision in persisted_revisions)
+        if persisted_revisions else "(none)"
+    )
+    if persisted_view is not None:
+        recorded_body = (
+            f'<p class="meta">Recorded revision {persisted_view.revision} · Status '
+            f'{_chip(persisted_view.status_label)}</p>'
+            f'<p class="summary-line">{_esc(persisted_view.summary)}</p>'
+            + _review_sections(persisted_view)
+        )
+    else:
+        recorded_body = (
+            '<p class="note">No connection-review state is persisted for this project. '
+            "Reading this page changes nothing: nothing was created, recorded or advanced.</p>"
+        )
+    limit_items = "".join(
+        '<div class="blocker">'
+        f'<div class="head"><h3>{_esc(label)}</h3>{_chip(state)}</div>'
+        f"<p>{_esc(reason)}</p>"
+        "</div>"
+        for label, state, reason in limitations
+    )
+    body = (
+        "<main>"
+        + _backlink(action_prefix)
+        + "<header class=\"masthead\">"
+        + '<div class="brand">SteelSpec production review</div>'
+        + f"<h1>{_esc(heading)}</h1>"
+        + masthead_meta
+        + "</header>"
+        + refusal
+        + "<h2>Project</h2>"
+        + (f'<div class="card"><dl class="kv">{identity_body}</dl></div>' if identity_body
+           else '<div class="card"><p class="note">Not stated.</p></div>')
+        + "<h2>Extraction coverage</h2>"
+        + (f'<div class="card"><dl class="kv">{coverage_body}</dl></div>' if coverage_body
+           else '<div class="card"><p class="note">Nothing was reconstructed, so no coverage '
+                "is stated.</p></div>")
+        + f'<p class="note">Extraction runs: {_esc(runs)}</p>'
+        + queue
+        + "<h2>Actions</h2>"
+        + (f'<div class="card">{limit_items}</div>' if limit_items
+           else '<div class="card"><p class="note">No action applies: nothing was '
+                "reconstructed and nothing is recorded.</p></div>")
+        + "<h2>Recorded review state</h2>"
+        + f'<p class="big">{_esc(persisted_code)}</p>'
+        + f'<p class="note">Recorded revisions: {_esc(revisions)}</p>'
+        + recorded_body
+        + "</main>"
+    )
+    return _page(f"Review {heading}" if heading else "Review", body)
+
+
+# --------------------------------------------------------------------------------------
+# The page-exception surface (J18) — the pages of one drawing set whose response
+# could not be read, and the one action a human may take on each of them.
+#
+# The record's own two lines are printed verbatim, the record's own refusal code
+# is printed when it could not be listed, and a Retry control is rendered ONLY on
+# a page whose own view carries the retry action. Nothing here reads, retries or
+# decides: rendering this page is not an action, and no control exists that the
+# view did not carry for that exact page.
+# --------------------------------------------------------------------------------------
+def _backlink(action_prefix: str) -> str:
+    """The surface's own back link.
+
+    Empty prefix -> `/`, which is what the internal review UI's root route is and
+    what every page here has always rendered. A prefix names the surface's own
+    root, so a page served from a mounted production path links back into that
+    path instead of to a route it does not own.
+    """
+    return f'<p class="backlink"><a href="{_esc(action_prefix) or "/"}">&#8592; Back to project</a></p>'
+
+
+def _page_exception_notice(notice):
+    """The result of the retry a human just requested, as the view reported it.
+
+    The tone comes from J17's own `resolved`: green only when J17 said the page
+    stopped being a failure, red when it said the page still is, neutral when it
+    said nothing at all — which covers both a refusal and a request that was only
+    accepted. The state is always printed, so a refusal reads as the code it was
+    refused with, and a request that has not been read yet reads as exactly that.
+    """
+    if notice is None:
+        return ""
+    if notice.resolved is True:
+        tone = "success-banner"
+    elif notice.resolved is False:
+        tone = "fail-banner"
+    else:
+        tone = "attention-banner"
+    page = (
+        f'<p class="note">Page: {notice.page_number}</p>'
+        if notice.page_number is not None else ""
+    )
+    return (
+        f'<section class="card {tone} banner">'
+        '<div class="banner-label">Retry result</div>'
+        f'<p class="big">{_esc(notice.state_label)}</p>'
+        f"<p>{_esc(notice.detail)}</p>"
+        f'<p class="note">Result state: {_esc(notice.state)}</p>'
+        f"{page}"
+        "</section>"
+    )
+
+
+def _page_exception_card(exception, action_prefix=""):
+    """One unread page: what it is, what state it is in, why — and the Retry
+    control its own view offers, named for that page.
+
+    `action_prefix` is where THIS surface is mounted (J19). It is empty for the
+    internal review UI, whose own routes are the ones the controls name, and it
+    is the production review surface's own path when the same page is served
+    from the authenticated production route — so the Retry control posts to the
+    surface that rendered it rather than to a route that does not exist there.
+    """
+    controls = []
+    for action in exception.actions:
+        if action.action == ACTION_RETRY_PAGE:
+            controls.append(
+                f'<form method="post" action="{_esc(action_prefix)}/pages/{exception.page_number}/retry">'
+                f'<button class="btn btn-primary">{_esc(action.label)}</button></form>'
+            )
+        else:
+            controls.append(f'<span class="note">{_esc(action.label)}</span>')
+    return (
+        '<section class="card attention-banner banner">'
+        f'<div class="banner-label">Unread page {exception.page_number}</div>'
+        f"<h3>{_esc(exception.type_label)}</h3>"
+        f"<p>{_chip(exception.state_label)}</p>"
+        f"<p>{_esc(exception.detail)}</p>"
+        f'<p class="note">State: {_esc(exception.state)} · '
+        f"Type: {_esc(exception.exception_type)}</p>"
+        + (
+            f'<p class="actions">{" ".join(controls)}</p>' if controls
+            else '<p class="note">No action is available for this page right now.</p>'
+        )
+        + "</section>"
+    )
+
+
+def render_page_exceptions_page(view: PageExceptionListView, *, action_prefix: str = "") -> str:
+    """Renders the page-exception surface from a PageExceptionListView alone:
+    the project and the status it carries, what the record states, and per unread
+    page the one action the view offers for that page.
+
+    `action_prefix` says where this surface is mounted, so the page's one control
+    and its back link name the surface that rendered it. It is empty for the
+    internal review UI (whose own routes are named) and the production review
+    surface's own path when the authenticated production route serves the same
+    page. Nothing else about the page changes: the view is rendered exactly as
+    the view model states it either way.
+    """
+    refusal = ""
+    if view.record_refusal is not None:
+        refusal = (
+            '<section class="card fail-banner banner">'
+            '<div class="banner-label">Record not listable</div>'
+            f'<p class="big">{_esc(view.record_refusal)}</p>'
+            + (f"<p>{_esc(view.record_refusal_message)}</p>"
+               if view.record_refusal_message else "")
+            + "</section>"
+        )
+    if view.exceptions:
+        listing = "".join(_page_exception_card(e, action_prefix) for e in view.exceptions)
+    elif view.record_refusal is None:
+        # The record states no parse failure, and it states it — so the empty
+        # list is a fact about the drawing set, not a missing answer.
+        listing = (
+            '<div class="card"><p class="note">No page of this drawing set is recorded as '
+            "having failed to parse.</p></div>"
+        )
+    else:
+        # A record that could not be listed states no page count and no page list;
+        # showing an empty list here would present half of a contradiction as one.
+        listing = ""
+    meta = (
+        f"Status {_chip(view.status_label)} · record not listable"
+        if view.record_refusal is not None
+        else f"Status {_chip(view.status_label)} · {len(view.exceptions)} unread page(s)"
+    )
+    body = (
+        "<main>"
+        f"{_backlink(action_prefix)}"
+        '<header class="masthead">'
+        '<div class="brand">Page exceptions</div>'
+        f"<h1>{_esc(view.project_id or 'Unknown project')}</h1>"
+        f'<p class="meta">{meta}</p>'
+        "</header>"
+        '<p class="note">Reading a page again is a request a human makes. Nothing on this page '
+        "reads the drawing set, retries anything or decides anything by itself.</p>"
+        + _page_exception_notice(view.notice)
+        + refusal
+        + (f"<h2>Unread pages</h2>{listing}" if listing else "")
+        + "<h2>The record this list is read from</h2>"
+        '<div class="card"><dl class="kv">'
+        f"<dt>Coverage record</dt><dd>{_esc(view.coverage_line) or '&mdash;'}</dd>"
+        f"<dt>Parse failures</dt><dd>{_esc(view.failures_line) or '&mdash;'}</dd>"
+        "</dl></div>"
+        f'<p class="note">{_esc(view.summary)}</p>'
+        "</main>"
+    )
+    return _page("Page exceptions", body)
+
+
+# --------------------------------------------------------------------------------------
 # Message pages — stale refusals, refusals, unbound sessions.
 # --------------------------------------------------------------------------------------
-def render_message_page(title: str, message: str, *, refresh_form: bool = False) -> str:
+def render_message_page(
+    title: str, message: str, *, refresh_form: bool = False, action_prefix: str = "",
+) -> str:
+    """A page that states one thing and offers one control, if any.
+
+    `action_prefix` is the surface this page was served from (J19), exactly as
+    for the page-exception surface: empty means the internal review UI's own
+    routes, and a prefix means the mounted production surface's.
+    """
     refresh = (
-        '<form method="post" action="/refresh"><button class="btn">Refresh review</button></form>'
+        f'<form method="post" action="{_esc(action_prefix)}/refresh">'
+        '<button class="btn">Refresh review</button></form>'
         if refresh_form else ""
     )
     return _page(
         title,
         "<main class=\"msg-page\">"
-        '<p class="backlink"><a href="/">&#8592; Back to project</a></p>'
+        f"{_backlink(action_prefix)}"
         '<div class="card">'
         f"<h1>{_esc(title)}</h1><p>{_esc(message)}</p>{refresh}"
         "</div>"

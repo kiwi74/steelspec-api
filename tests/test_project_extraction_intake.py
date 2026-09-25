@@ -162,9 +162,17 @@ def test_real_arkles_member_extraction_supplies_real_known_member_marks():
 
 
 def test_the_real_known_marks_use_the_pipelines_own_linking_convention():
-    """Pins known-mark derivation to app/pipeline.py's mark_to_id (read as text; importing it needs SUPABASE_URL)."""
+    """Pins known-mark derivation to app/pipeline.py's mark_to_id (read as text; importing it needs SUPABASE_URL).
+
+    Milestone J16 moved where the map is BUILT without changing the convention:
+    `_persist_connections` is now the one linking path, shared by the whole-document
+    run and by a continuation, and it derives the map from the persisted member rows
+    it is handed rather than being handed a prebuilt one. The convention itself is
+    unchanged — a connection's marks resolve through `{row["mark"]: row["id"]}`, and
+    a mark that resolves to nothing is not linked.
+    """
     source = (REPO / "app" / "pipeline.py").read_text()
-    assert 'mark_to_id = {row["mark"]: row["id"] for row in inserted_members if row.get("mark")}' in source
+    assert 'mark_to_id = {row["mark"]: row["id"] for row in member_rows if row.get("mark")}' in source
     assert 'linked_ids = [mark_to_id[mark] for mark in (c.get("connects_members") or []) if mark in mark_to_id]' in source
 
 

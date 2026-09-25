@@ -90,7 +90,10 @@ from app.cad_engine.automation_gate import (
     AUTOMATION_DECISION_CONFIRM,
     AUTOMATION_DECISION_REVIEW,
 )
-from app.cad_engine.automation_pipeline import AutomationPipelineResult
+from app.cad_engine.automation_pipeline import (
+    AutomationPipelineResult,
+    ReferenceDataIdentity,
+)
 from app.cad_engine.fabrication_output_gate import (
     FabricationOutputGateResult,
     ProjectFabricationOutputGateResult,
@@ -148,8 +151,14 @@ class DrawingDispatchResult:
     error. `catalogue_version` is the genuine 7AA pipeline result's own
     recorded catalogue version (None when the producing run used a
     matcher that declares none) — so the record OF a produced drawing
-    identifies which section catalogue its geometry came from. Plain
-    frozen data only; it records, it never grants.
+    identifies which section catalogue its geometry came from.
+    `reference_identity` is the 7AA result's own reference-data identity
+    (source kind, formal identity status, and the digest of the reference
+    rows the matcher loaded), carried through unchanged so the record of a
+    produced drawing states WHICH reference data it came from. It is None
+    exactly when the producing run recorded none. The digest is a content
+    fingerprint, never a catalogue version, and nothing here recomputes it.
+    Plain frozen data only; it records, it never grants.
     """
     connection_id: str | None
     decision: str
@@ -158,6 +167,7 @@ class DrawingDispatchResult:
     generated_files: tuple[Path, ...]
     generation_error: str | None
     catalogue_version: str | None = None
+    reference_identity: ReferenceDataIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -195,6 +205,7 @@ def _blocked_result(
     status: str,
     requested_formats: tuple[str, ...],
     catalogue_version: str | None,
+    reference_identity: ReferenceDataIdentity | None = None,
 ) -> DrawingDispatchResult:
     return DrawingDispatchResult(
         connection_id=gate_result.connection_id,
@@ -204,6 +215,7 @@ def _blocked_result(
         generated_files=(),
         generation_error=None,
         catalogue_version=catalogue_version,
+        reference_identity=reference_identity,
     )
 
 
@@ -213,6 +225,7 @@ def _failed_result(
     generated_files: tuple[Path, ...],
     error: str,
     catalogue_version: str | None,
+    reference_identity: ReferenceDataIdentity | None = None,
 ) -> DrawingDispatchResult:
     return DrawingDispatchResult(
         connection_id=gate_result.connection_id,
@@ -222,6 +235,7 @@ def _failed_result(
         generated_files=generated_files,
         generation_error=error,
         catalogue_version=catalogue_version,
+        reference_identity=reference_identity,
     )
 
 
@@ -297,11 +311,13 @@ def dispatch_fabrication_drawing(
         return _blocked_result(
             gate_result, OUTPUT_STATUS_BLOCKED_REVIEW, formats,
             pipeline_result.catalogue_version,
+            pipeline_result.reference_identity,
         )
     if gate_result.decision == AUTOMATION_DECISION_CONFIRM:
         return _blocked_result(
             gate_result, OUTPUT_STATUS_BLOCKED_CONFIRMATION, formats,
             pipeline_result.catalogue_version,
+            pipeline_result.reference_identity,
         )
     if gate_result.decision != AUTOMATION_DECISION_AUTO:
         return _failed_result(
@@ -309,6 +325,7 @@ def dispatch_fabrication_drawing(
             f"unrecognized 7AE decision {gate_result.decision!r}; dispatch refuses to generate "
             "without an accepted AUTO permission.",
             pipeline_result.catalogue_version,
+            pipeline_result.reference_identity,
         )
 
     assembly = pipeline_result.reviewed_assembly
@@ -318,6 +335,7 @@ def dispatch_fabrication_drawing(
             "the authorized pipeline result carries no reviewed assembly; nothing was rebuilt "
             "and nothing was generated.",
             pipeline_result.catalogue_version,
+            pipeline_result.reference_identity,
         )
     if isinstance(assembly, ReviewedTwoMemberConnectionAssembly):
         entry = drawing_entry
@@ -336,6 +354,7 @@ def dispatch_fabrication_drawing(
             "the accepted 7AE permission carries no connection identity; dispatch refuses to "
             "name an output file from nothing.",
             pipeline_result.catalogue_version,
+            pipeline_result.reference_identity,
         )
 
     output_dir = Path(output_dir)
@@ -363,6 +382,7 @@ def dispatch_fabrication_drawing(
         return _failed_result(
             gate_result, formats, tuple(generated), "; ".join(errors),
             pipeline_result.catalogue_version,
+            pipeline_result.reference_identity,
         )
     return DrawingDispatchResult(
         connection_id=gate_result.connection_id,
@@ -372,6 +392,7 @@ def dispatch_fabrication_drawing(
         generated_files=tuple(generated),
         generation_error=None,
         catalogue_version=pipeline_result.catalogue_version,
+        reference_identity=pipeline_result.reference_identity,
     )
 
 
