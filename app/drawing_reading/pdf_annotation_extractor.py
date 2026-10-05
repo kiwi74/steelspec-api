@@ -60,7 +60,6 @@ evidence; a later milestone decides what to do with it.
 from __future__ import annotations
 
 import bisect
-import hashlib
 import io
 import json
 import re
@@ -970,6 +969,9 @@ def page_evidence(
     return tuple(occurrences)
 
 
+from app.drawing_reading.source_document import source_document_sha256_of_bytes
+
+
 def source_bytes(source: Any) -> bytes:
     """The document's own bytes, from a path or from bytes already in hand.
 
@@ -999,8 +1001,15 @@ def source_document_sha256(source: Any) -> str:
 
     It is a property of the file and not of the machine: no timestamp, no path and no UUID
     enters it, and the same bytes produce the same digest wherever they are read.
+
+    E2E-001N moved the ARITHMETIC to `app.drawing_reading.source_document`, because the
+    ingestion path needed the same rule and taking it from here would have made ingestion an
+    annotation-layer consumer — the boundary J28 guards. What remains here is not a second
+    implementation: this function reads a source that may be a PATH through `source_bytes`
+    (the layer that owns "this source could not be read") and then delegates the hashing to
+    the one rule. The digest is identical for identical bytes.
     """
-    return hashlib.sha256(source_bytes(source)).hexdigest()
+    return source_document_sha256_of_bytes(source_bytes(source))
 
 
 def extract_annotations(

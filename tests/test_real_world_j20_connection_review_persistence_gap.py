@@ -761,6 +761,14 @@ FROZEN_ROUTES = (
     # surface — it renders the queue and adds no route that accepts a decision, so the
     # vocabulary rule below still holds and the route carries none of its ten words.
     (("GET",), "/production/review/{project_id}/workflow"),
+    # E2E-001N: the document ingestion route. It registers uploaded files as source
+    # documents of an authorized project and nothing else — it extracts nothing, opens no
+    # review, takes no claim, records no revision and produces no artifact. It creates no
+    # second document authority: it calls the SAME `create_project_document` the extraction
+    # pipeline calls, so content identity and its deduplication rule are the project's
+    # existing ones. Named here so the list stays exact: the read surface this milestone
+    # renders still cannot resolve anything, and this route accepts no decision.
+    (("POST",), "/projects/{project_id}/documents"),
     (("POST",), "/retry-extraction/{project_id}"),
     ((), "/review"),
 )

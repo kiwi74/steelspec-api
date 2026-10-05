@@ -442,6 +442,69 @@ def drawing_sets_for_project(project_id: str) -> list[dict]:
     ) or []
 
 
+def analysis_runs_for_drawing_set(drawing_set_id: str) -> list[dict]:
+    """Every analysis run recorded against one drawing set, oldest first.
+
+    A run's `status` is the run's own outcome — the pipeline writes `"completed"` when a
+    whole-document read finished and `"failed"` when it did not — so this is the per-run
+    state a project-level aggregation needs, and the only place it is recorded.
+
+    E2E-001N. Read-only: nothing here decides what a run's status MEANS, and a caller that
+    reads an empty list has learned that no run was recorded, not that one succeeded.
+    """
+    return (
+        supabase.table("analysis_runs")
+        .select("id,drawing_set_id,status,created_at")
+        .eq("drawing_set_id", drawing_set_id)
+        .order("created_at")
+        .execute()
+        .data
+    ) or []
+
+
+def document_extraction_states(project_id: str) -> list[dict]:
+    """Each of a project's documents beside the state of the runs that read it.
+
+    E2E-001N. It composes reads that already existed rather than introducing a second
+    account of anything: the documents come from `project_documents_for_project`, the
+    lineage from `drawing_sets_for_project` → `drawings_for_drawing_set`, and the run
+    outcome from `analysis_runs_for_drawing_set`.
+
+    Each row is `{"document_id", "file_name", "run_status"}`, where `run_status` is
+    `"completed"`, `"failed"`, `"running"` (a run exists but has reached neither terminal
+    state), or `None` when NO run has been recorded for that document at all. `None` and
+    `"running"` are different facts and are deliberately not merged: one says nothing has
+    read this document yet, the other says something is reading it.
+
+    A document read by more than one run reports the LATEST run's status, because a
+    re-extraction is a later attempt at the same document and the newest attempt is the
+    one that describes it. Nothing here ranks documents against each other.
+    """
+    run_status_by_document: dict[str, str | None] = {}
+    for drawing_set in drawing_sets_for_project(project_id):
+        statuses = [
+            run.get("status") for run in analysis_runs_for_drawing_set(drawing_set["id"])
+        ]
+        latest = statuses[-1] if statuses else None
+        if latest in ("completed", "failed") or latest is None:
+            state = latest
+        else:
+            state = "running"
+        for drawing in drawings_for_drawing_set(drawing_set["id"]):
+            document_id = drawing.get("document_id")
+            if document_id:
+                run_status_by_document[document_id] = state
+
+    return [
+        {
+            "document_id": document["id"],
+            "file_name": document.get("file_name"),
+            "run_status": run_status_by_document.get(document["id"]),
+        }
+        for document in project_documents_for_project(project_id)
+    ]
+
+
 def drawings_for_drawing_set(drawing_set_id: str) -> list[dict]:
     """The drawings of one drawing set, with the source file each was read from.
 

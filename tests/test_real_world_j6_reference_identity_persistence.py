@@ -980,6 +980,16 @@ class TestLegacyRows:
             # FILE, not an identity, and it reaches no member row; see the
             # docstring.
             "update_document_role",
+            # E2E-001N reads — readers only, and they reach no member row. The
+            # first reads one drawing set's analysis runs; the second composes it
+            # with J61's and J16's reads to pair each of a project's documents
+            # with the run that read it, so a project holding several documents
+            # can be summarised as a SET rather than as whichever run finished
+            # last. Both are `select` and nothing else — neither carries an
+            # insert, an update, a delete or an rpc, so neither can rewrite a
+            # written row, and neither touches `steel_members`, a section or a
+            # reference identity, which is what this test guards.
+            "analysis_runs_for_drawing_set", "document_extraction_states",
         }
         assert not any(
             name.startswith("update") and "member" in name for name in public

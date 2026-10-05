@@ -1625,6 +1625,14 @@ class TestQNoDocumentIdOnAppendOnlyEvidence:
             # touches no drawing edge, no page count and no evidence table. It is on this
             # list because it addresses a document, which is what this list is about.
             "update_document_role",
+            # E2E-001N: the per-document run-state READ. It names `document_id` because it
+            # follows `drawings.document_id` to pair each of a project's documents with the
+            # run that read it, so a project holding several documents can be summarised as
+            # a SET rather than as whichever run finished last. It is on this list because
+            # it addresses documents, which is what this list is about — and it is a READ:
+            # it writes no document column, creates no document row and touches no evidence
+            # table, so J61's three provenance writes are still the only document writes.
+            "document_extraction_states",
         }, writers
 
     def test_the_pipeline_writes_a_document_id_only_where_J61_put_it(self):

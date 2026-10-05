@@ -59,7 +59,18 @@ server talks to PostgreSQL with the service-role key, which bypasses RLS.
 import logging
 import os
 import tempfile
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import (
+    BackgroundTasks,
+    Body,
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -90,6 +101,7 @@ from app.production_annotation_evidence import (
 )
 from app.production_connection_review import build_workflow_review, render_workflow_review
 from app.production_review_wire import workflow_wire
+from app.production_document_ingest import ingest_documents
 from app.production_review.authorization import authorize_project
 from app.production_review.binding import bind_project_review, bound_page_retry, render_bound_review
 from app.production_review.identity import (
@@ -698,6 +710,90 @@ def generate_report(project_id: str, reviewer=Depends(require_reviewer)):
         raise HTTPException(status_code=500, detail=safe_failure_message(exc))
 
     return {"status": "report_generated", "report_pdf_path": report_path}
+
+
+# ======================================================================================
+# E2E-001N — the production document ingestion route.
+#
+# The missing half of a capability the architecture already had. J61 gave a project many
+# documents, J63 taught `/extract` to address one, and `plan_first_window` already refuses an
+# unaddressed request once a project holds two — but nothing could create the second
+# document, because `create_project_document` has one caller and the browser cannot reach
+# `project_documents` at all.
+#
+# WHAT IT IS, AND WHAT IT IS NOT. It authenticates and authorizes exactly as every other
+# production route does, then hands the files to `app.production_document_ingest`, which
+# stores each under the project's existing `uploads` prefix and registers it through the
+# EXISTING `create_project_document` — so content identity and its dedup rule are the
+# project's existing ones. It creates no bucket, no policy, no second document authority and
+# no extraction: `POST /extract/{project_id}` remains the only thing that reads a document,
+# and it is addressed per document by the caller.
+#
+# WHAT THE CLIENT MAY NOT SAY. The project comes from the URL and the owner from the access
+# token, so a form carrying any field other than the files is refused BY NAME rather than
+# silently ignored — the same posture the resolution route takes, for the same reason: an
+# ignored field is a caller who believes they set something.
+# ======================================================================================
+@app.post("/projects/{project_id}/documents")
+async def ingest_project_documents(
+    project_id: str,
+    request: Request,
+    files: list[UploadFile] = File(...),
+    reviewer=Depends(require_reviewer),
+):
+    """Registers each uploaded file as a source document of this project.
+
+    One outcome per file, in the order sent: `created`, `deduplicated` (these exact bytes
+    were already a document of this project, so nothing new was stored) or `failed` with a
+    stated code and reason. A failure is per file — no rollback is attempted and none is
+    claimed, because there is no transaction across Storage and Postgres and pretending to
+    one would misreport what happened.
+    """
+    # AUTHORIZATION before anything is read, from this request's own credential.
+    project = _authorized_project(project_id, reviewer)
+
+    # The request's own shape, before any side effect. The form is already parsed, so this
+    # reads the cached form rather than the stream, and it names what it refuses.
+    form = await request.form()
+    unexpected = sorted(name for name in form.keys() if name != "files")
+    if unexpected:
+        raise HTTPException(
+            status_code=422,
+            detail=_route_refusal_detail(
+                "INGEST_REFUSED_UNEXPECTED_FIELD",
+                f"the request names {unexpected}. The project comes from the URL, the owner "
+                "from the access token, and the storage path is composed server-side — none "
+                "of them is ever taken from a caller.",
+            ),
+        )
+    if not files:
+        raise HTTPException(
+            status_code=422,
+            detail=_route_refusal_detail(
+                "INGEST_REFUSED_NO_FILES", "the request carried no files to ingest."
+            ),
+        )
+
+    payloads = [(upload.filename, await upload.read()) for upload in files]
+
+    outcomes = ingest_documents(
+        # The owner is the authorized caller, which `_authorized_project` has just proven is
+        # this project's own owner — so the storage prefix these objects are filed under is
+        # the one the deployed browser policies require, and no request body can move it.
+        owner_id=reviewer.user_id,
+        project_id=project["id"],
+        files=payloads,
+    )
+
+    return {
+        "project_id": project_id,
+        "documents": outcomes,
+        "created": sum(1 for outcome in outcomes if outcome["status"] == "created"),
+        "deduplicated": sum(
+            1 for outcome in outcomes if outcome["status"] == "deduplicated"
+        ),
+        "failed": sum(1 for outcome in outcomes if outcome["status"] == "failed"),
+    }
 
 
 # ======================================================================================

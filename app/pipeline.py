@@ -876,6 +876,10 @@ def _run_pipeline(filepath: str, project_id: str, user_id: str, drawing_set_id: 
         engineer_reference=drawing_meta["drawing_number"],
         structural_engineer=drawing_meta["drawing_title"],
     )
+    # E2E-001N — that write described ONE document. On a project holding more than one
+    # document it is not the project's summary, so it is reconciled to the document set
+    # before this function returns.
+    reconcile_project_summary(project_id)
 
     return {
         "pages_processed": len(pages),
@@ -1526,6 +1530,8 @@ def continue_pdf_extraction(
         unmatched_sections=unmatched_sections,
         warnings=warnings,
     )
+    # E2E-001N — reconcile the project row to its whole document set (see below).
+    reconcile_project_summary(project_id)
 
     return {
         "window": {
@@ -2006,6 +2012,8 @@ def retry_pdf_page(
         unmatched_sections=unmatched_sections,
         warnings=warnings,
     )
+    # E2E-001N — reconcile the project row to its whole document set (see below).
+    reconcile_project_summary(project_id)
 
     return {
         "page_number": page,
@@ -2029,3 +2037,81 @@ def retry_pdf_page(
         "project_status": status,
         "warnings": warnings,
     }
+
+
+# ======================================================================================
+# E2E-001N — THE PROJECT SUMMARY OF A MULTI-DOCUMENT PROJECT.
+#
+# Before this milestone every write to a project row described ONE document.
+# `parse_pdf_and_save` derives a status from the evidence it just persisted and the coverage
+# it just read, then writes it with absolute totals — `total_members=len(members_to_insert)`
+# and so on. That is correct while a project holds one document, and it stops being correct
+# the moment it holds two: the second run would replace the project's totals with its own,
+# and whichever document finished LAST would define the whole project.
+#
+# WHAT THIS FUNCTION DOES. It is called after each run's own write, and it makes the project
+# row describe the document SET. It reads nothing new: every fact it uses is already
+# persisted — per-document run state from `document_extraction_states` (project_documents →
+# drawings → drawing_sets → analysis_runs), and the project's own members and connections.
+#
+# A SINGLE-DOCUMENT PROJECT IS UNCHANGED. Fewer than two documents means the run's own
+# summary already WAS the project's, so this returns without writing. That is deliberate:
+# the existing behaviour is the first branch rather than something preserved by accident.
+#
+# WHAT IT CANNOT DO YET, STATED RATHER THAN GLOSSED. Page coverage is established per
+# document by the run that read it, and no cross-document coverage record is persisted. This
+# function therefore passes `coverage=None`, which `derive_project_status` treats exactly as
+# an incomplete coverage — so a multi-document project can reach `review` but not `done`
+# until cross-document coverage exists. That is the conservative direction on purpose: it can
+# under-claim completion and cannot over-claim it, which is the only acceptable error here.
+# ======================================================================================
+def reconcile_project_summary(project_id: str) -> None:
+    """Make the project row describe its whole document set, not the run that wrote last.
+
+    A store that cannot answer "which documents does this project have, and what read them"
+    is a store this function has no basis to reconcile, so it returns and leaves the run's
+    own summary standing — which is the pre-E2E-001N behaviour rather than a wrong one. The
+    production repository answers it; a partial double that predates this milestone does not.
+    """
+    reader = getattr(repo, "document_extraction_states", None)
+    if reader is None:
+        return
+    states = reader(project_id)
+    if len(states) < 2:
+        # The pre-E2E-001N behaviour, and the first branch on purpose.
+        return
+
+    members = repo.member_rows_for_project(project_id)
+    connections = repo.connection_rows_for_project(project_id)
+
+    run_states = [state.get("run_status") for state in states]
+    if any(state is None or state == "running" for state in run_states):
+        status = "processing"
+    elif any(state == "failed" for state in run_states):
+        status = "failed"
+    else:
+        status = derive_project_status(
+            member_review_statuses=[row.get("review_status") for row in members],
+            connection_review_statuses=[row.get("review_status") for row in connections],
+            unmatched_sections=(),
+            warnings=(),
+            coverage=None,
+        ).status
+
+    total_weight_kg = sum(float(row.get("total_weight_kg") or 0) for row in members)
+    sections = {row.get("section_name") for row in members if row.get("section_name")}
+
+    repo.update_project_summary(
+        project_id,
+        status=status,
+        total_members=len(members),
+        total_unique_sections=len(sections),
+        total_connections=len(connections),
+        total_weight_kg=total_weight_kg,
+        total_weight_tonnes=round(total_weight_kg / 1000, 3),
+        # No single document's number describes a set of documents, so neither reference is
+        # taken from whichever run finished last. `None` states that no one document is the
+        # project's; keeping the last run's value would have stated the opposite.
+        engineer_reference=None,
+        structural_engineer=None,
+    )
