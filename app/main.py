@@ -99,7 +99,11 @@ from app.production_annotation_evidence import (
     build_annotation_evidence_review,
     render_annotation_evidence_review,
 )
-from app.production_connection_review import build_workflow_review, render_workflow_review
+from app.production_connection_review import (
+    build_workflow_review,
+    render_workflow_review,
+    review_documents,
+)
 from app.production_review_wire import workflow_wire
 from app.production_document_ingest import ingest_documents
 from app.production_review.authorization import authorize_project
@@ -894,17 +898,57 @@ def production_page_retry(project_id: str, page_number: int, background_tasks: B
     )
 
 
+def _review_document_scope(project_id: str, document_id: str | None) -> str | None:
+    """The document a review is about, once it is known to be THIS project's.
+
+    E2E-002G. The document arrives in the request, so it is checked against the project the
+    request was already authorized for rather than trusted. One that is not this project's
+    is a 404 — the addressed thing does not exist here — and nothing is reconstructed with
+    it. A caller that named no document passes `None` straight through, which is the
+    pre-existing request and behaves exactly as it always did.
+
+    The check is a membership test over the project's OWN documents, so no identifier a
+    caller states can reach another project's, and no document is ever inferred from a
+    filename, a page count, a role, a recency or how many readings it has.
+    """
+    if document_id is None:
+        return None
+    known = {document.get("document_id") for document in review_documents(project_id)}
+    if document_id not in known:
+        raise HTTPException(
+            status_code=404,
+            detail=_route_refusal_detail(
+                "REVIEW_DOCUMENT_UNKNOWN",
+                f"document {document_id!r} is not a source document of project {project_id!r}",
+            ),
+        )
+    return document_id
+
+
 @app.get("/production/review/{project_id}/workflow", response_class=HTMLResponse)
-def production_workflow_review(project_id: str, reviewer=Depends(require_reviewer)):
+def production_workflow_review(
+    project_id: str,
+    document_id: str | None = Query(default=None),
+    reviewer=Depends(require_reviewer),
+):
     """One authorized project's reconstructed review, read from its own record.
 
     The project is authorized before anything is read, from this request's own
     credential, and the composition reads the persisted review state and rebuilds
     the initial review from the persisted readings. Nothing here writes, and no
     action on the rendered page can be performed by asking for it.
+
+    `document_id` (E2E-002G) names WHICH of the project's source documents this review is
+    about. It is OPTIONAL and omitting it is the pre-existing request: a project whose
+    readings belong to one document reconstructs exactly as it always did, and a project
+    with several refuses — the reconstruction never chooses. A named document must be this
+    project's own, checked here before anything is reconstructed.
     """
     _authorized_project(project_id, reviewer)
-    return render_workflow_review(build_workflow_review(project_id))
+    document_id = _review_document_scope(project_id, document_id)
+    return render_workflow_review(
+        build_workflow_review(project_id, document_id=document_id)
+    )
 
 
 # ======================================================================================
@@ -918,15 +962,29 @@ def production_workflow_review(project_id: str, reviewer=Depends(require_reviewe
 # `app.production_connection_review`.
 # ======================================================================================
 @app.get("/production/review/{project_id}/review")
-def production_review_read(project_id: str, reviewer=Depends(require_reviewer)):
+def production_review_read(
+    project_id: str,
+    document_id: str | None = Query(default=None),
+    reviewer=Depends(require_reviewer),
+):
     """One authorized project's review as structured JSON (E2E-001A).
 
     Authorized before anything is read, from this request's own credential, exactly as
     the page route above is. The composition is that route's own — this function adds no
     rule, re-derives no status and writes nothing at all.
+
+    `document_id` (E2E-002G) is the same optional scope the page route takes, and the
+    response carries the project's documents so a client can be told which one a review is
+    about. Omitting it is the pre-existing request.
     """
     _authorized_project(project_id, reviewer)
-    return workflow_wire(build_workflow_review(project_id))
+    document_id = _review_document_scope(project_id, document_id)
+    return workflow_wire(
+        build_workflow_review(project_id, document_id=document_id),
+        # The project's own documents, so the client can be TOLD which one a review is about
+        # rather than the reconstruction having to choose between them.
+        documents=review_documents(project_id),
+    )
 
 
 @app.get("/production/review/{project_id}/annotations", response_class=HTMLResponse)
@@ -997,6 +1055,7 @@ def production_connection_resolve(
     project_id: str,
     package_id: str,
     body: dict = Body(...),
+    document_id: str | None = Query(default=None),
     reviewer=Depends(require_reviewer),
 ):
     """Records one human review of one connection, and delivers what it earns.
@@ -1020,6 +1079,10 @@ def production_connection_resolve(
     # AUTHORIZATION before anything is read, from this request's own credential.
     project = _authorized_project(project_id, reviewer)
     binding = _bound_review(project_id, project, reviewer)
+    # The document scope, checked against this project's own documents before any side
+    # effect — so a document that is not this project's is refused while nothing has been
+    # claimed, resumed or resolved.
+    document_id = _review_document_scope(project_id, document_id)
 
     # The request body, before any side effect. A malformed request is malformed
     # whatever this deployment's configuration is, so it is answered as itself rather
@@ -1037,6 +1100,9 @@ def production_connection_resolve(
             binding=binding,
             package_id=package_id,
             request=request,
+            # The SAME document scope the review was read under, so a connection is never
+            # resolved against a project-wide reconstruction the review did not use.
+            document_id=document_id,
         )
     except ClaimRefused as refused:
         # J44's refusal already carries when the lease ends, so a caller learns when the

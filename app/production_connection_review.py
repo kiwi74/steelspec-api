@@ -363,9 +363,61 @@ def _recorded_reading_rows(readings: tuple[RecordedFieldReading, ...]) -> tuple:
     )
 
 
+def review_documents(project_id: str, *, repository=None) -> list[dict]:
+    """The project's source documents, each with whether it carries persisted readings.
+
+    E2E-002G. This exists so a caller can be TOLD which document a review is about instead
+    of the reconstruction having to guess between them — and so the route can refuse a
+    document that is not this project's before anything is reconstructed.
+
+    `has_readings` is not a heuristic. It is the same criterion the reconstruction itself
+    applies when it builds its candidate list: a document's drawing has at least one
+    `page_extraction_captures` row. Nothing here infers eligibility from a filename, a page
+    count, a role, a recency or how many evidence rows a document produced — a document with
+    no captures is reported as having none, and never as eligible.
+
+    A document with no drawing at all — nothing has read it yet — is returned with
+    `has_readings` false rather than omitted, so a caller can tell "this project has two
+    documents" from "this project has two documents and one of them has been read".
+
+    Read-only, and scoped to the project it is given: every read below is filtered by
+    `project_id`, so no identifier a caller states could reach another project's documents.
+    """
+    store = repository
+    if store is None:
+        from app.engineering_data import repository as project_store
+
+        store = project_store
+
+    readings_by_document: dict[str, bool] = {}
+    for drawing_set in store.drawing_sets_for_project(project_id):
+        for drawing in store.drawings_for_drawing_set(drawing_set.get("id")):
+            document_id = drawing.get("document_id")
+            if not document_id:
+                continue
+            rows = store.page_extraction_captures_for_drawing(drawing.get("id")) or []
+            readings_by_document[document_id] = (
+                readings_by_document.get(document_id, False) or bool(rows)
+            )
+
+    # No `role`. A document's role is a human ASSERTION with a deliberately narrow read
+    # model — J64's guard pins how many modules may read one — and nothing here needs it:
+    # a document is selected by its id and judged eligible by its captures. Widening a role
+    # reader to label a button would be a poor trade for the invariant it costs.
+    return [
+        {
+            "document_id": document.get("id"),
+            "file_name": document.get("file_name"),
+            "has_readings": readings_by_document.get(document.get("id"), False),
+        }
+        for document in store.project_documents_for_project(project_id)
+    ]
+
+
 def build_workflow_review(
     project_id: str,
     *,
+    document_id: str | None = None,
     section_matcher=None,
     repository=None,
     recorded_state=None,
@@ -400,6 +452,11 @@ def build_workflow_review(
                 section_matcher if section_matcher is not None else section_matcher_for_review()
             ),
             repository=repository,
+            # E2E-002G — the document this review is ABOUT, when the caller named one.
+            # `None` is the pre-existing request and behaves exactly as it always has: a
+            # project whose readings belong to one document is reconstructed, and a project
+            # with several refuses rather than choosing. Nothing here infers a document.
+            document_id=document_id,
         )
     except ReconstructionRefused as refused:
         refusal_code = refused.code

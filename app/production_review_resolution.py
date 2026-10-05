@@ -631,6 +631,7 @@ def _resolve(
     section_matcher,
     repository,
     history,
+    document_id: str | None = None,
 ) -> ProductionResolutionOutcome:
     """Every step between the claim and the release, in the required order."""
     project_id = binding.project_id
@@ -642,6 +643,9 @@ def _resolve(
         expected_revision=request.expected_revision,
         repository=repository,
         history=history,
+        # The SAME document scope the review was read under. Resolution must not silently
+        # fall back to a project-wide reconstruction the review never used.
+        document_id=document_id,
     )
     if resumed is None:
         raise ResolutionRouteRefused(
@@ -855,6 +859,11 @@ def resolve_production_connection(
     repository: Any = None,
     history: Sequence | None = None,
     working_dir: object = None,
+    #: E2E-002G — the document this review is about, when the caller named one. It reaches
+    #: the reconstruction unchanged and is `None` by default, so a caller that has never
+    #: heard of it resolves exactly as it did before. The route has already established that
+    #: the document belongs to this project; nothing here infers or re-checks one.
+    document_id: str | None = None,
 ) -> ProductionResolutionOutcome:
     """One authorized project's resolution of one connection, from claim to release.
 
@@ -920,6 +929,7 @@ def resolve_production_connection(
             section_matcher=matcher,
             repository=repository,
             history=history,
+            document_id=document_id,
         )
     except BaseException as raised:
         failure = raised

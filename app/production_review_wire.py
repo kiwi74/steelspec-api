@@ -41,7 +41,7 @@ read anywhere in this file.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 from app.cad_engine.exception_resolution import (
     ANSWER_ACKNOWLEDGMENT,
@@ -178,7 +178,7 @@ def _connection_wire(item) -> dict[str, Any]:
     }
 
 
-def workflow_wire(review) -> dict[str, Any]:
+def workflow_wire(review, *, documents: Iterable[dict] = ()) -> dict[str, Any]:
     """The whole review as data, from the composition the page route already renders.
 
     `revision` is the revision the store HAS RECORDED — the same value `POST /open`
@@ -196,6 +196,19 @@ def workflow_wire(review) -> dict[str, Any]:
 
     return {
         "project_id": review.project_id,
+        # E2E-002G — the project's source documents and whether each carries readings, so a
+        # client can be TOLD which document a review is about instead of the reconstruction
+        # having to choose. Rendered, not decided: the list is composed by the caller from
+        # the project's own rows, and a document with no readings is stated as such rather
+        # than omitted.
+        "documents": [
+            {
+                "document_id": document.get("document_id"),
+                "file_name": document.get("file_name"),
+                "has_readings": bool(document.get("has_readings")),
+            }
+            for document in documents
+        ],
         "revision": max(recorded) if recorded else 0,
         "revision_recorded": bool(recorded),
         "recorded_revisions": list(recorded),

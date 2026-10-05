@@ -298,7 +298,10 @@ def surface(production, monkeypatch):
 
     composed: list = []
 
-    def _compose(project_id):
+    def _compose(project_id, **_kwargs):
+        # E2E-002G gave this route an optional document scope. This file is about the wire
+        # form of the review, not about the scope, so the keyword is accepted and ignored
+        # here; `test_real_world_e2e002g_review_document_scope.py` is where it is asserted.
         composed.append(project_id)
         return _review(view=_view())
 
@@ -426,7 +429,7 @@ class TestWireForm:
     ):
         surface.monkeypatch.setattr(
             surface.production.main, "build_workflow_review",
-            lambda project_id: _review(view=_view(), revisions=()),
+            lambda project_id, **_kwargs: _review(view=_view(), revisions=()),
         )
         body = surface.http.get(surface.url).json()
         assert body["revision"] == 0
@@ -435,7 +438,7 @@ class TestWireForm:
     def test_the_advanced_revision_is_reported(self, surface):
         surface.monkeypatch.setattr(
             surface.production.main, "build_workflow_review",
-            lambda project_id: _review(view=_view(revision=3), revisions=(0, 1, 2, 3)),
+            lambda project_id, **_kwargs: _review(view=_view(revision=3), revisions=(0, 1, 2, 3)),
         )
         body = surface.http.get(surface.url).json()
         assert body["revision"] == 3
@@ -445,7 +448,7 @@ class TestWireForm:
     ):
         surface.monkeypatch.setattr(
             surface.production.main, "build_workflow_review",
-            lambda project_id: _review(
+            lambda project_id, **_kwargs: _review(
                 view=None, refusal_code="SNAPSHOT_REFUSED_NO_REVIEW_LAYER",
                 refusal_detail="no review layer is recorded",
             ),

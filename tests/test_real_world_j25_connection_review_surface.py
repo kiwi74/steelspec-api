@@ -907,7 +907,11 @@ class TestTheSource:
         composition call in the route body."""
         source = inspect.getsource(production.main.production_workflow_review)
         assert source.index("_authorized_project") < source.index("build_workflow_review")
-        assert "render_workflow_review(build_workflow_review(project_id))" in source
+        # E2E-002G — the route takes an optional document scope and passes it through. The
+        # property is unchanged: the composition is given the project and the scope the
+        # caller stated, and nothing else the caller could have supplied. The call is named
+        # exactly, so a further argument still has to be declared here.
+        assert "build_workflow_review(project_id, document_id=document_id)" in source
 
 
 # ===========================================================================

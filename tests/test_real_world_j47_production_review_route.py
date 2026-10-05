@@ -1870,11 +1870,17 @@ class TestTheHttpSurface:
         assert response.json()["review_revision"] == 1
         assert response.json()["pointer_recorded"] is True
 
-    def test_the_route_passes_exactly_three_arguments_to_the_composition(
+    def test_the_route_passes_only_the_authorized_scope_to_the_composition(
         self, http, monkeypatch
     ):
-        """The binding is the authorization proof; the package and the request are the
-        only other things the composition is given. No project id, no reviewer, no path."""
+        """The binding is the authorization proof; the package, the request and — since
+        E2E-002G — the document scope are the only other things the composition is given.
+        No project id, no reviewer, no path.
+
+        The scope is not a fourth identity: it is the caller's own statement of WHICH
+        document the review is about, already checked against this project's documents
+        before the call. The list stays exact, so a further argument still has to be
+        declared here."""
         seen = {}
 
         def capture(**kwargs):
@@ -1885,7 +1891,7 @@ class TestTheHttpSurface:
 
         monkeypatch.setattr(http.main, "resolve_production_connection", capture)
         http.http.post(http.url, json=_body())
-        assert sorted(seen) == ["binding", "package_id", "request"]
+        assert sorted(seen) == ["binding", "document_id", "package_id", "request"]
         assert seen["package_id"] == PACKAGE
         assert seen["binding"].project_id == PROJECT
 
