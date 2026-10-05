@@ -234,6 +234,19 @@ class ExceptionResolutionTask:
     `evidence_requirement` says what kind of evidence is required.
     `status` is OPEN or RESOLVED; `resolution` is set exactly when
     RESOLVED.
+
+    `field_name` (J79) is the ONE engineering field this task addresses, or
+    None. It is the review package's own vocabulary (`ENGINEERING_FIELDS`)
+    and is STATED by the code that builds the task — never derived from
+    `task_type`, `current_ai_value`, `answer_type`, blocker order or task
+    order, and never guessed for a task that addresses several fields or
+    none. None therefore means "this task does not address exactly one
+    engineering field", which is a fact about the task and not a gap: a
+    grouped task, a whole-connection task and a conflict task all state it
+    truthfully. It defaults to None so that every task constructed before
+    this field existed — including a payload recorded before it existed —
+    reads back exactly as it was, and it is refused rather than coerced
+    when it names something that is not an engineering field.
     """
     task_id: str
     task_type: str
@@ -243,8 +256,20 @@ class ExceptionResolutionTask:
     answer_type: str
     allowed_choices: tuple[str, ...]
     evidence_requirement: str
+    field_name: str | None = None
     status: str = STATUS_OPEN
     resolution: "HumanResolution | None" = None
+
+    def __post_init__(self) -> None:
+        # Fail closed, and say so in the package's own vocabulary: a field name that is not
+        # one of ENGINEERING_FIELDS is a caller's error and is never coerced, dropped or
+        # reinterpreted as "no field". None is the stated absence and passes.
+        if self.field_name is not None and self.field_name not in ENGINEERING_FIELDS:
+            raise ValueError(
+                f"field_name must be one of {list(ENGINEERING_FIELDS)} or None "
+                f"(got {self.field_name!r}); a task states the field it addresses and a "
+                "value outside the vocabulary is never coerced into one."
+            )
 
 
 @dataclass(frozen=True)
@@ -349,7 +374,16 @@ def _conflict_current_values(package: ConnectionReviewPackage, field_name: str) 
 
 def _make_task(task_type: str, blocker_codes: Sequence[str], question: str, current_ai_value: Any,
                answer_type: str, allowed_choices: Sequence[str], evidence: str,
-               package_id: str, index: int) -> ExceptionResolutionTask:
+               package_id: str, index: int, *, field_name: str | None) -> ExceptionResolutionTask:
+    """One task, with the field it addresses STATED by its caller (J79).
+
+    `field_name` is keyword-only and has NO default, deliberately: a call site that does not
+    say which field its task addresses is a TypeError rather than a task that silently
+    reads as "no field". That is the whole difference between a boundary and a convention,
+    and it is what keeps the value from being inferred here — this function copies what it
+    is told and derives nothing, so no ordering, no answer type and no AI value can leak
+    into it.
+    """
     return ExceptionResolutionTask(
         task_id=f"{package_id}-T{index:02d}",
         task_type=task_type,
@@ -359,6 +393,7 @@ def _make_task(task_type: str, blocker_codes: Sequence[str], question: str, curr
         answer_type=answer_type,
         allowed_choices=tuple(allowed_choices),
         evidence_requirement=evidence,
+        field_name=field_name,
     )
 
 
@@ -381,10 +416,11 @@ def _review_tasks(
     tasks: list[ExceptionResolutionTask] = []
     package_id = candidate.review_package_id
 
-    def add(task_type, blocker_codes, question, current_ai_value, answer_type, choices, evidence):
+    def add(task_type, blocker_codes, question, current_ai_value, answer_type, choices, evidence,
+            *, field_name):
         tasks.append(_make_task(
             task_type, blocker_codes, question, current_ai_value, answer_type, choices, evidence,
-            package_id, len(tasks) + 1,
+            package_id, len(tasks) + 1, field_name=field_name,
         ))
 
     # 1. Review workflow status — "approved" is the one status 7V accepts; approval alone does
@@ -399,6 +435,7 @@ def _review_tasks(
             "The existing review contract requires review_status 'approved' and human-owned provenance "
             "on every required engineering field. Approval alone does not make missing engineering "
             "information appear, and the 7V/7Z gates re-check everything once the workflow is complete.",
+            field_name=None,
         )
 
     # 2-4. Member identity, position and attachment surface. When all three are blocked, one
@@ -420,6 +457,7 @@ def _review_tasks(
             "connection position (START/END), and the attachment surface for each identified member. "
             "AI-extracted references are shown exactly as extracted and are never reinterpreted as "
             "structural steel member marks.",
+            field_name=None,
         )
     else:
         if member_blocked:
@@ -431,6 +469,7 @@ def _review_tasks(
                 "Select the validated structural member(s) this connection attaches to. AI-extracted "
                 "references are shown exactly as extracted and are never reinterpreted as structural "
                 "steel member marks.",
+                field_name="connected_member_marks",
             )
         if position_blocked:
             add(
@@ -440,6 +479,7 @@ def _review_tasks(
                 ANSWER_POSITION_VALUE, CONNECTION_POSITION_CHOICES,
                 "Provide the explicit connection position required by the reviewed connection contract. "
                 "Position is never inferred from list order, page context or member geometry.",
+                field_name="position",
             )
         if attachment_blocked:
             add(
@@ -450,6 +490,7 @@ def _review_tasks(
                 "Select the explicit attachment surface/reference for each identified member (the "
                 "existing attachment contract accepts START/END). A surface reference is never "
                 "defaulted to END or START.",
+                field_name="attachments",
             )
 
     # 5. Provenance — AI values the reviewer has not explicitly confirmed or replaced.
@@ -466,6 +507,7 @@ def _review_tasks(
             "Each field still carrying an AI-extracted value must be explicitly confirmed "
             "(HUMAN_REVIEWED) or replaced by the reviewer (HUMAN_SUPPLEMENTED). Confirming and "
             "supplying the same field is ambiguous and is rejected by the existing review package.",
+            field_name=None,
         )
 
     # 6. Plate — the AI's reading is shown, but a reviewed plate must be explicit.
@@ -478,6 +520,7 @@ def _review_tasks(
             "Provide the explicit plate the reviewed connection contract consumes: exactly one plate "
             "with type, thickness_mm, width_mm and depth_mm. AI-extracted plate readings are shown "
             "exactly as extracted; they are not reviewed values.",
+            field_name="plate",
         )
 
     # 7. Hole diameter — nominal bolt sizes are shown exactly as extracted and are never a diameter.
@@ -490,6 +533,7 @@ def _review_tasks(
             "Provide the specified hole diameter: an explicit numeric hole-void diameter "
             "(diameter_mm) with quantity and spacing. Nominal bolt sizes are shown exactly as "
             "extracted; a nominal bolt size is not a hole diameter and is never converted into one.",
+            field_name="holes",
         )
 
     # 8. Location — the AI schema has no location field, so there is nothing to show.
@@ -502,6 +546,7 @@ def _review_tasks(
             "Provide the explicit project-space location (x/y/z with rotations) required by the "
             "reviewed connection contract. Coordinates are never derived from member placements, "
             "plate dimensions or page position.",
+            field_name="location",
         )
 
     # 9. Malformed AI fields — preserved verbatim, never coerced.
@@ -517,6 +562,7 @@ def _review_tasks(
             "Unparseable AI values are preserved verbatim and are never coerced into engineering "
             "fields; the affected fields must be supplied by the reviewer through their own tasks. "
             "This task grants nothing by itself.",
+            field_name=None,
         )
 
     # 10. Conflicting reviewer decisions — one task per conflicted field, resolved through the
@@ -534,6 +580,13 @@ def _review_tasks(
                 "The reviewer's decisions for this field conflict and neither is applied by the "
                 "existing review package. Decide: confirm the AI value, supply your own value, or "
                 "drop both — never both for the same field.",
+                # One task per conflicted field, and still None (J79): the issue the task is
+                # built from may name a field outside ENGINEERING_FIELDS entirely
+                # (`UNKNOWN_CONFIRMED_FIELD`, raised for a name that "is not a reviewable
+                # engineering field"), so no single field can be stated uniformly for this
+                # task type. The field is not guessed from the issue and not chosen from the
+                # answer.
+                field_name=None,
             )
 
     # 11. The 7V completeness rejection, its error carried verbatim.
@@ -548,6 +601,7 @@ def _review_tasks(
             "Resolve the missing reviewed engineering fields required by the specification contract. "
             "The existing 7V completeness gate remains authoritative; supplying or confirming the "
             "fields it names resolves this task, and this task itself grants nothing.",
+            field_name=None,
         )
 
     # 12. Failed downstream validation — the preserved failure, verbatim.
@@ -566,6 +620,7 @@ def _review_tasks(
             "Automated progression requires validated geometry (7R). Correct the reviewed "
             "engineering fields the failure describes; the existing pipeline re-validates and 7Z "
             "re-decides. This task itself grants nothing.",
+            field_name=None,
         )
 
     # 13. Connection identity — the one non-blocker task, appended after the 7Z blocker tasks so
@@ -584,6 +639,17 @@ def _review_tasks(
             "persistence, or given by the reviewer'). Supply the identifier this connection "
             "carries into the fabrication-output chain: a non-empty identifier string. It is "
             "never derived from page data, member marks or list order.",
+            # None, and it is not an oversight: `connection_id` is NOT a member of
+            # ENGINEERING_FIELDS (the review package's provenance vocabulary is
+            # connected_member_marks, position, plate, holes, location, attachments, material).
+            # Stating it here would both widen a closed vocabulary and hand every later
+            # reader a field name that vocabulary does not contain, so the task states the
+            # honest fact instead: it resolves no ENGINEERING_FIELD. The identity it asks
+            # for is real and is still asked for — it is simply not one of the seven fields
+            # this boundary binds. `review_contract._TASK_FIELDS` labels this task type
+            # `connection_id`, which is the PRESENTATION's own wider label; that
+            # pre-existing difference is left exactly as it was.
+            field_name=None,
         )
 
     # 14. Material specification — the second non-blocker task, appended after identity so the
@@ -606,6 +672,7 @@ def _review_tasks(
             "filenames; if no authoritative source states a grade, do not invent one — the "
             "drawing continues to carry MATERIAL NOT SPECIFIED and the production acceptance "
             "reports this task as unresolved.",
+            field_name="material",
         )
 
     remaining = codes - {t for task in tasks for t in task.blocker_codes}
@@ -633,6 +700,7 @@ def _confirm_task(
             "confirmation remains. After confirmation the existing automation pipeline is re-run and "
             "7Z re-decides — the confirmation itself never forces AUTO.",
             candidate.review_package_id, 1,
+            field_name=None,
         ),
     )
     # The same explicitly-requested material supplementation as the REVIEW task set: appended
@@ -653,6 +721,7 @@ def _confirm_task(
                 "drawing continues to carry MATERIAL NOT SPECIFIED and the production acceptance "
                 "reports this task as unresolved.",
                 candidate.review_package_id, 2,
+                field_name="material",
             ),
         )
     return tasks

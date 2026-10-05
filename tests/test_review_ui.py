@@ -659,6 +659,8 @@ def test_render_layer_import_purity():
         "_provenance_rows", "_evidence_block", "_review_section", "_review_sections",
         # J18's page-exception atoms.
         "_page_exception_notice", "_page_exception_card",
+        # J29's annotation-evidence atom: one table row per recorded occurrence.
+        "_annotation_evidence_rows",
         # J19's back link: it names the surface's own root, which is "/" unless a
         # mounted production surface is the one rendering.
         "_backlink",

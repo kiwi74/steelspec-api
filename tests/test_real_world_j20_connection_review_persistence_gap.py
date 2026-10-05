@@ -177,8 +177,9 @@ RECONSTRUCTION = {
     "blockers": (
         ABSENT,
         "The 7AB blocker codes plus the task each is addressed by. The AUTOMATION_BLOCKER_* "
-        "vocabulary appears in no table; `connections.warnings` is a free-text column the "
-        "connection writer never sets.",
+        "vocabulary appears in no table. `connections.warnings` is a free-text column the "
+        "writer sets for exactly one thing — the J37C-8V connection-type accounting line — "
+        "which is not this vocabulary and carries no gate decision.",
     ),
     "warnings": (
         ABSENT,
@@ -222,8 +223,11 @@ RECONSTRUCTION = {
     "ai_connection_type": (
         LOSSY,
         "The AI's own stated type. Persistence normalises it into a closed vocabulary "
-        "(bolted/welded/bolted_and_welded/unspecified), so the AI's token is unrecoverable and "
-        "'unspecified' conflates 'the AI stated nothing' with 'the token was not in the list'.",
+        "(bolted/welded/bolted_and_welded/unspecified), so the column never holds the AI's "
+        "token, and 'unspecified' conflates 'the AI stated nothing' with 'the token was not in "
+        "the list'. J37C-8V makes the substitution visible on the row (a connections.warnings "
+        "line carrying the token verbatim) but does not persist the token AS this field, so "
+        "the value the contract reads is still not recoverable from a column.",
     ),
     "ai_confidence": (
         RECONSTRUCTABLE,
@@ -277,6 +281,29 @@ RECONSTRUCTION = {
         "requires_action, blockers and tasks — every one of which is absent, so the sentence has "
         "nothing to be recomposed from.",
     ),
+    # The two J66 fields. They are the first fields of this contract with a persisted source
+    # that the J20 design did not propose: J66's own citation table, whose every column is the
+    # address the contract reads. Nothing in the J20 verdict moves — the eleven deciding fields
+    # and the five lossy readings are untouched — but the coverage below is extended so these
+    # two are classified rather than silently unclassified.
+    "field_citations": (
+        RECONSTRUCTABLE,
+        "The J66 citation table (`connection_review_item_citations`), one row per field per "
+        "ordinal: drawing_id, page_number, analysis_run_id, the occurrence triple, "
+        "citation_kind, document_id and the anchor json. The contract reads the ADDRESS back "
+        "verbatim (the two coordinates and the anchor through the same `_display` rule "
+        "`ai_confidence` reads its number through) and orders it by the design's own field "
+        "order, then ordinal. Empty is the honest reading, not a gap: no rows means no "
+        "citations, and the table is empty in production by construction.",
+    ),
+    "field_standings": (
+        RECONSTRUCTABLE,
+        "Computed from `field_citations` and deliberately never stored, so it cannot become a "
+        "second fact disagreeing with the citations it summarises: no citations is UNCITED, "
+        "SOURCE alone is DIRECT, any DERIVATION makes it DERIVED, and a field carrying both "
+        "kinds is DERIVED. Every field of ENGINEERING_FIELDS gets a standing, so the seven "
+        "fields of an uncited revision all read UNCITED.",
+    ),
 }
 
 #: The minimum data model, per field, that a migration would have to supply.
@@ -314,6 +341,12 @@ MINIMUM_DATA_MODEL = {
     "last_processed_revision": ("connection_review_items.last_processed_revision", None),
     "summary": (None, ("decision", "output_status", "verification_status",
                        "requires_action", "blockers", "tasks")),
+    "field_citations": (
+        "connection_review_item_citations(field_name, ordinal, citation_kind, document_id, "
+        "drawing_id, page_number, analysis_run_id, annotation_x, annotation_y, "
+        "extractor_version, anchor)", None,
+    ),
+    "field_standings": (None, ("field_citations",)),
 }
 
 
@@ -340,9 +373,12 @@ class TestEveryFieldTheContractReadsIsClassified:
         counted = {}
         for bucket, _ in RECONSTRUCTION.values():
             counted[bucket] = counted.get(bucket, 0) + 1
+        # J66 added two fields to the contract and both have a persisted source, so the two
+        # reconstructable names grew to four while the pass-through count, the lossy count and
+        # the absent count are exactly what they were: nothing that had no source gained one.
         assert counted == {
             PERSISTED_VERBATIM: 1,
-            RECONSTRUCTABLE: 2,
+            RECONSTRUCTABLE: 4,
             LOSSY: 5,
             ABSENT: 18,
         }, counted
@@ -691,7 +727,36 @@ FROZEN_ROUTES = (
     (("POST",), "/generate-report/{project_id}"),
     (("GET",), "/health"),
     (("GET",), "/production/review/{project_id}"),
+    # J29: the READ-ONLY PDF annotation evidence viewer. It renders the occurrences J28
+    # recorded and adds no route that accepts, applies or records anything, so the
+    # vocabulary rule below still holds and the route carries none of its ten words.
+    (("GET",), "/production/review/{project_id}/annotations"),
+    # J47: the FIRST route that accepts a decision. It is why the vocabulary rule below
+    # now names it as its one declared exception rather than holding over every path:
+    # this route's job IS to record a human resolution against a connection, so its path
+    # names a connection and a resolve, and a rule that could not say so would have to be
+    # deleted instead of narrowed.
+    (("POST",),
+     "/production/review/{project_id}/connections/{package_id}/resolve"),
+    # J64: the FIRST route that records a fact about a SOURCE DOCUMENT rather than about
+    # what a reading of one found. It writes one column of one `project_documents` row —
+    # the role a human asserted — scoped by the project in its path, and it chooses no
+    # source, opens no review, takes no decision and produces no artifact, so the
+    # vocabulary rule below still holds and its path carries none of those ten words.
+    (("POST",), "/production/review/{project_id}/document-role"),
+    # J50: the baseline-opening operation. It records the project's OWN reconstructed
+    # revision-0 review baseline and nothing else — no decision, no artifact, no claim, no
+    # generation — so the vocabulary rule below still holds and its path carries none of
+    # those ten words. It accepts no field at all: an opening request is empty.
+    (("POST",), "/production/review/{project_id}/open"),
     (("POST",), "/production/review/{project_id}/pages/{page_number}/retry"),
+    # E2E-001A: the review READ contract. A GET that renders the composition the workflow
+    # route already renders, as DATA rather than as a page — because every production route
+    # authenticates from an Authorization header, which a browser form POST cannot carry,
+    # so the rendered review was readable but not actionable. It accepts NO decision, takes
+    # no claim, records no revision, generates no artifact and reads no working directory,
+    # so the vocabulary rule below still holds and its path carries none of those ten words.
+    (("GET",), "/production/review/{project_id}/review"),
     # J25: the milestone that decided to bind. It is the READ-ONLY reconstruction
     # surface — it renders the queue and adds no route that accepts a decision, so the
     # vocabulary rule below still holds and the route carries none of its ten words.
@@ -699,6 +764,10 @@ FROZEN_ROUTES = (
     (("POST",), "/retry-extraction/{project_id}"),
     ((), "/review"),
 )
+
+#: J47's decision-accepting route, named once so the guards below can make their one
+#: exception by IDENTITY rather than by a pattern that would let a second one in.
+J47_RESOLUTION_ROUTE = "/production/review/{project_id}/connections/{package_id}/resolve"
 
 
 def _declared_routes(application):
@@ -720,12 +789,26 @@ class TestNoProductionBindingWasAdded:
 
     def test_no_route_touches_a_connection_review(self, production):
         """No path names a connection, a contract, a package, a decision, a
-        blocker, a task or a gate."""
+        blocker, a task or a gate — with ONE declared exception.
+
+        J47 is the milestone that bound connection review, and it did it with exactly one
+        route, named here. The rule is narrowed to that identity rather than relaxed: a
+        SECOND path naming any of these words is still refused, which is what this guard
+        was always for."""
         forbidden = ("connection", "contract", "package", "candidate", "decision",
                      "blocker", "task", "gate", "resolve", "review-items")
         for _, path in _declared_routes(production.main.app):
+            if path == J47_RESOLUTION_ROUTE:
+                continue
             lowered = path.lower()
             assert not [word for word in forbidden if word in lowered], path
+
+    def test_the_exception_is_exactly_one_route_and_it_is_j47s(self, production):
+        """The exception above is only as narrow as this: one path, and it is J47's."""
+        named = [path for _, path in _declared_routes(production.main.app)
+                 if path == J47_RESOLUTION_ROUTE]
+        assert named == [J47_RESOLUTION_ROUTE]
+        assert J47_RESOLUTION_ROUTE in [path for _, path in FROZEN_ROUTES]
 
     def test_the_production_review_package_does_not_import_the_contract(self):
         """No production module reads the 7AK contract or its view model — so
@@ -804,7 +887,19 @@ class TestNoProductionBindingWasAdded:
         """J20 authored none. The one migration added since it is J22's, which implements
         J21's accepted design and not this milestone's report; the second is J23's, which
         records the raw AI reading and likewise implements neither this milestone's report
-        nor its four folded-away tables. The four are still nowhere."""
+        nor its four folded-away tables; the third is J28's, which records PDF annotation
+        occurrences and implements none of them either. The four are still nowhere.
+
+        The list is exact rather than a lower bound on purpose: a migration this test has
+        not been told about is a migration nobody has stated the reason for, and stating
+        the reason is the whole assertion. J28's entry was added by J28 and names itself
+        here, so the next one has to do the same. J44's entry was added by J44 for the same
+        reason: it places a claim row keyed by project, and it implements none of the four
+        folded-away tables either, which are still nowhere. J61's entry was added by J61 for
+        the same reason: it gives a source document of a project an identity and points a
+        drawing at it, and it implements none of those four tables either. J66's entry was
+        added by J66 for the same reason: it records where one field of one reviewed
+        connection came from, and it implements none of those four tables either."""
         migrations = sorted(p.name for p in (REPO / "supabase" / "migrations").glob("*.sql"))
         assert migrations == [
             "20260924000000_j5_section_resolution_truth.sql",
@@ -812,6 +907,10 @@ class TestNoProductionBindingWasAdded:
             "20260924020000_j8b_connection_plate_evidence_nullability.sql",
             "20260925000000_j22_connection_review_persistence.sql",
             "20260925010000_j23_page_extraction_captures.sql",
+            "20260927000000_j28_pdf_annotation_occurrences.sql",
+            "20260928000000_j44_project_review_claims.sql",
+            "20260929000000_j61_project_documents.sql",
+            "20260929010000_j66_field_evidence_citations.sql",
         ], migrations
         for name in migrations:
             assert "j20" not in name.lower()
@@ -819,8 +918,13 @@ class TestNoProductionBindingWasAdded:
     def test_the_minimum_data_model_is_reported_not_implemented(self):
         """This milestone's own finding is unchanged: the four tables it folded away —
         findings, readings, provenance, tasks, outputs — are absent from every migration.
-        The remaining two names are the ones J21 designed, and they appear in exactly one
-        file, J22's migration, because that is what the next milestone implemented."""
+        The remaining two names are the ones J21 designed, and they appear in exactly TWO
+        files: J22's migration, which implemented them, and J66's, which hangs one more
+        table from the item and therefore has to name it in a foreign key. The assertion
+        stays an exact set of those two files rather than a lower bound, so a third file
+        naming either table has to be declared here rather than absorbed. J65 ratified that
+        widening, and only that widening: it is a permission for the TWO migrations that
+        own the review tables to name them, not a general licence to name them anywhere."""
         text = "\n".join(p.read_text() for p in (REPO / "supabase").rglob("*.sql")).lower()
         for absent in (
             "connection_review_findings", "connection_review_readings",
@@ -833,7 +937,8 @@ class TestNoProductionBindingWasAdded:
             if "connection_review_items" in p.read_text().lower()
         ]
         assert appearing_in == [
-            "20260925000000_j22_connection_review_persistence.sql"
+            "20260925000000_j22_connection_review_persistence.sql",
+            "20260929010000_j66_field_evidence_citations.sql",
         ], appearing_in
 
     def test_the_read_only_entry_points_of_the_contract_still_require_a_workflow(self, production):

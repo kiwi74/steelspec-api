@@ -7,12 +7,15 @@ The request-time seam behind exactly one route:
 
     GET /production/review/{project_id}/workflow
 
-It joins four things that already exist and adds no fifth:
+It joins five things that already exist and adds no sixth:
 
     the J24A revision-0 producer      -> the reconstructed 7AJ workflow
     the J22 store's own read          -> the persisted connection-review state
     7AK's two contract builders       -> the same contract for both bands
     7AM's view model                  -> the same view for both bands
+    the J80 consumer boundary         -> each persisted task's own recorded address,
+                                         read off the task's own item and the drawing's
+                                         WHOLE reading history (J23's own read)
 
     build_workflow_review(project_id)  reads and composes;  pure afterwards
     render_workflow_review(review)     renders the composition; reads nothing
@@ -20,6 +23,20 @@ It joins four things that already exist and adds no fifth:
 The route body is those two calls, in that order, behind the J19 boundary. Nothing
 here is process-global: every value a request needs is built within the request and
 returned to it, so two simultaneous requests for two projects cannot see each other.
+
+THE FIFTH JOIN IS A READ, AND IT IS THE ONLY READ THE RECORDED BAND ADDS
+========================================================================
+J81 made this module the FIRST production caller of the J80 boundary. Everything the
+recorded band needs for it is ALREADY IN THE ITEM the store returned: the address is
+the persisted item's own `evidence`, the field is the persisted task's own statement,
+and the drawing the history is loaded FOR is the drawing the item's own evidence names.
+Nothing is reconstructed beside the item, so a superseded attempt cannot be answered
+with the current one. The load path is J23's whole-history read, reached through the
+`capture_history_for_drawing` seam below, and `authoritative_captures` — the rule that
+decides which attempt STANDS for a page — is deliberately NOT the input: it would
+replace the attempt the item cited with the attempt the selection kept. An item
+recorded before J72 carries no origin keys and is left exactly that way: its candidate
+half reads as R3's `RUN_ABSENT`, which is the true answer and not a gap to fill.
 
 THE RECORDED BAND, AND WHY IT IS NOT REVISION ZERO
 ==================================================
@@ -74,6 +91,10 @@ from app.engineering_data.connection_review_repository import (
     NO_PERSISTED_CONNECTION_REVIEW_STATE,
     read_connection_review_state,
 )
+from app.production_recorded_readings import (
+    RecordedFieldReading,
+    read_recorded_field_readings,
+)
 from app.production_review.project_workflow_reconstruction import (
     ReconstructionRefused,
     ReconstructedProjectWorkflow,
@@ -87,6 +108,7 @@ __all__ = [
     "PROJECT_NOT_FOUND",
     "WorkflowReview",
     "build_workflow_review",
+    "capture_history_for_drawing",
     "recorded_review_state",
     "render_workflow_review",
     "review_store_client",
@@ -115,6 +137,14 @@ class WorkflowReview:
     carry J24A's own code and detail verbatim when it refused. A refusal does not
     suppress the recorded band: what is stored stays readable whatever the
     reconstruction could or could not do.
+
+    `recorded_field_readings` (J81) is the RECORDED band's evidence half: one entry per
+    persisted task of every persisted item, each carrying the task's own field statement
+    beside the candidate its own item's recorded address names. It is empty exactly when
+    no snapshot is recorded, because there is then no persisted item to read an address
+    off. It is a READ-ONLY representation added to this composition — no persisted
+    contract changes with it, and the readings are computed from the store's own returned
+    items rather than from the reconstruction beside them.
     """
 
     project_id: str
@@ -128,6 +158,7 @@ class WorkflowReview:
     persisted_code: str
     persisted_revisions: tuple[int, ...]
     persisted_view: ProjectReviewView | None
+    recorded_field_readings: tuple[RecordedFieldReading, ...]
     limitations: tuple[tuple[str, str, str], ...]
 
 
@@ -155,6 +186,25 @@ def review_store_client():
     from app.supabase_client import supabase
 
     return supabase
+
+
+def capture_history_for_drawing(drawing_id: str):
+    """One drawing's WHOLE reading history, every attempt kept — imported on use.
+
+    This is J23's own read (`page_extraction_captures_for_drawing`): all windows, all
+    retries, an earlier attempt never overwritten by a later one. It decides nothing, which
+    is exactly why it is the right input: the rule that decides which attempt STANDS for a
+    page is `authoritative_captures`, and handing that SELECTION to the consumer would
+    answer with whichever attempt it kept instead of the one the persisted item cited.
+
+    The seam exists for the same reason `review_store_client` does — importing the
+    repository at module import would open a database client behind every import of this
+    module — and it is declared here rather than buried inside the consumer so that "which
+    history is read" is a decision made at the production call site, in the open.
+    """
+    from app.engineering_data.repository import page_extraction_captures_for_drawing
+
+    return page_extraction_captures_for_drawing(drawing_id)
 
 
 def recorded_review_state(project_id: str):
@@ -262,6 +312,57 @@ def _limitations(*views: ProjectReviewView | None) -> tuple:
     return tuple(_limitation(action) for action in seen.values())
 
 
+# ======================================================================================
+# J81 — the recorded readings, as plain data for the presentation layer.
+# ======================================================================================
+def _field_statement(reading: RecordedFieldReading) -> str:
+    """The task's own field statement, printed as it was stated and never re-derived.
+
+    The value is the reading's, verbatim: a task that names one engineering field prints
+    `FIELD_BOUND(name)`, and a task that names none prints `FIELD_NOT_SINGLE`. No third
+    wording is invented for either, and neither is described in the other's terms.
+    """
+    if reading.field_name is None:
+        return reading.field_state
+    return f"{reading.field_state}({reading.field_name})"
+
+
+def _evidence_statement(reading: RecordedFieldReading) -> str:
+    """What the item's OWN recorded address established, in the resolver's own words.
+
+    A resolution prints the rule that established it and the address terms the reading
+    carries; a refusal prints R3's own code and R3's own detail sentence. Nothing is
+    summarised, no candidate is quoted, and a refusal is never printed as an empty result:
+    the reason is the whole answer, because "the evidence establishes no candidate" is a
+    fact about the evidence rather than a failure of this surface.
+    """
+    outcome = reading.outcome
+    reason_code = getattr(outcome, "reason_code", None)
+    if reason_code is not None:
+        return f"{reason_code}: {outcome.detail}"
+    return (
+        f"{outcome.matched_by} · run {outcome.analysis_run_id} · page "
+        f"{outcome.page_number} · position {outcome.candidate_position}"
+    )
+
+
+def _recorded_reading_rows(readings: tuple[RecordedFieldReading, ...]) -> tuple:
+    """Each reading as (task, field statement, evidence statement) — plain strings.
+
+    Composed here rather than in the renderer, for the same reason the limitations are:
+    what a field state or an R3 refusal MEANS is an engineering statement, and
+    `app/review_ui/render.py` escapes and prints what it is handed while deciding nothing.
+    """
+    return tuple(
+        (
+            f"{reading.review_package_id} · {reading.task_id}",
+            _field_statement(reading),
+            _evidence_statement(reading),
+        )
+        for reading in readings
+    )
+
+
 def build_workflow_review(
     project_id: str,
     *,
@@ -277,9 +378,15 @@ def build_workflow_review(
 
     J23's `CaptureRefused` and 7AZ's `ValueError` are not caught here: J24A
     deliberately does not re-wrap another authority's refusal, and neither does this.
+    The recorded readings (J81) are read under the same standing: they go through J80's
+    boundary, which re-states none of R3's refusals and swallows none of them either, so
+    a refusal arrives as R3's own outcome rather than as an absence.
 
     `repository` is J24A's own seam (the project store, or a double for it);
-    `section_matcher` and `recorded_state` are this module's (see the seams above).
+    `section_matcher`, `recorded_state` and `capture_history_for_drawing` are this
+    module's (see the seams above). The capture seam is a module-level function rather
+    than a parameter so that a test replaces the SAME seam a request uses, instead of a
+    different route through the same read.
     """
     state = recorded_review_state(project_id) if recorded_state is None else recorded_state
 
@@ -320,6 +427,16 @@ def build_workflow_review(
         if state.snapshot is not None else None
     )
 
+    # J81: the recorded band's evidence half, read off the PERSISTED items the store returned
+    # and off nothing else. An item recorded before J72 recorded an origin carries none, and
+    # its candidate half reads as R3's `RUN_ABSENT` — the true answer, left as it is.
+    recorded_field_readings = (
+        read_recorded_field_readings(
+            state.snapshot, captures_for_drawing=capture_history_for_drawing,
+        )
+        if state.snapshot is not None else ()
+    )
+
     return WorkflowReview(
         project_id=project_id,
         identity=identity,
@@ -332,6 +449,7 @@ def build_workflow_review(
         persisted_code=state.code,
         persisted_revisions=tuple(state.revisions),
         persisted_view=persisted_view,
+        recorded_field_readings=recorded_field_readings,
         limitations=_limitations(view, persisted_view),
     )
 
@@ -351,6 +469,7 @@ def render_workflow_review(review: WorkflowReview) -> str:
         persisted_code=review.persisted_code,
         persisted_revisions=review.persisted_revisions,
         persisted_view=review.persisted_view,
+        recorded_readings=_recorded_reading_rows(review.recorded_field_readings),
         limitations=review.limitations,
         refusal_code=review.refusal_code,
         refusal_detail=review.refusal_detail,

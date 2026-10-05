@@ -13,14 +13,25 @@ Only reads that already existed, called through the repository that owns them:
     repository.drawing_sets_for_project(id)       the sets the project has
     repository.drawings_for_drawing_set(id)       the documents each was read from
 
+and, since J61, ONE further read of the same kind:
+
+    repository.document_for_drawing(drawing_id)   the source document a lineage read
+
+That read is made ONLY for a drawing whose own row names a document. A lineage that
+names none — one created before J61, or by the DXF path — has nothing to read, and its
+document is stated as None rather than fetched. The document is exposed as the row's own
+stored values; nothing here derives a role, a revision, a format or an identity from a
+filename, a path, a page count or any other field, and a document whose role is UNKNOWN
+is stated as UNKNOWN because UNKNOWN is what is stored.
+
 and, for the two halves of the committed record, the modules that WRITE those
 halves and therefore own their format:
 
     coverage_from_warnings(project["warnings"])        J15's reader
     parse_failures_from_warnings(project["warnings"])  J17's reader
 
-No new repository read was added for this milestone, no SQL was written, and
-nothing here reads a table the repository does not already expose.
+No SQL was written here, and nothing here reads a table the repository does not
+already expose.
 
 The warnings are handed to those two readers as the tuple this record states, and
 never as the raw value: a `warnings` value that is not a list of lines (a single
@@ -68,6 +79,7 @@ from app.validation.page_coverage import PageCoverage, coverage_from_warnings
 from app.validation.parse_failures import ParseFailures, parse_failures_from_warnings
 
 __all__ = [
+    "DocumentRecord",
     "DrawingRecord",
     "DrawingSetRecord",
     "ProjectReviewRecord",
@@ -108,13 +120,43 @@ def _rows(value) -> tuple[Mapping, ...]:
 
 
 @dataclass(frozen=True)
+class DocumentRecord:
+    """One source document, as the `project_documents` row states it (Milestone J61).
+
+    Every field is the stored value and nothing else. `role` in particular is exposed
+    exactly as it is stored — including `UNKNOWN`, which is what every document J61 creates
+    carries — and this module never infers one from a filename, a page count, a path, a
+    title or any model output. `content_sha256` is exposed as it is stored, and None means
+    IDENTITY NOT PROVEN: it is not a wildcard and no caller may compare it as one.
+    """
+
+    document_id: str | None
+    storage_path: str | None
+    file_name: str | None
+    source_format: str | None
+    byte_size: int | None
+    page_count: int | None
+    content_sha256: str | None
+    role: str | None
+    revision_label: str | None
+    supersedes_document_id: str | None
+
+
+@dataclass(frozen=True)
 class DrawingRecord:
-    """One document of a drawing set, as the `drawings` row states it."""
+    """One document of a drawing set, as the `drawings` row states it.
+
+    `document` is the source document this analysis lineage read, or None when the lineage
+    names none. The two are separate fields on purpose: a drawing is an ATTEMPT at reading a
+    document, not the document, and a record that collapsed them would state that a
+    re-extraction was a second document.
+    """
 
     drawing_id: str | None
     file_name: str | None
     storage_path: str | None
     page_count: int | None
+    document: DocumentRecord | None = None
 
 
 @dataclass(frozen=True)
@@ -168,8 +210,39 @@ class ProjectReviewRecord:
         )
 
 
+def _document_record(repository, drawing_id, document_id) -> DocumentRecord | None:
+    """The document one lineage names, read through the repository, or None.
+
+    `None` is returned WITHOUT a read when the drawing names no document: there is nothing
+    to look up, and reading anything to display an absence would be a read of a table for
+    no fact. The read that follows is the repository's own `document_for_drawing`, which
+    states the same absence as `None` for a pointer that names no row.
+
+    A row that is not a mapping, or one whose own id is not a non-empty string, is stated
+    as no document rather than as a blank one — the same convention every other absence in
+    this module follows.
+    """
+    if document_id is None:
+        return None
+    row = repository.document_for_drawing(drawing_id)
+    if not isinstance(row, Mapping) or _text(row.get("id")) is None:
+        return None
+    return DocumentRecord(
+        document_id=_text(row.get("id")),
+        storage_path=_text(row.get("storage_path")),
+        file_name=_text(row.get("file_name")),
+        source_format=_text(row.get("source_format")),
+        byte_size=_int(row.get("byte_size")),
+        page_count=_int(row.get("page_count")),
+        content_sha256=_text(row.get("content_sha256")),
+        role=_text(row.get("role")),
+        revision_label=_text(row.get("revision_label")),
+        supersedes_document_id=_text(row.get("supersedes_document_id")),
+    )
+
+
 def _drawing_set_records(repository, project_id) -> tuple[DrawingSetRecord, ...]:
-    """The project's drawing sets and their drawings, through the repository."""
+    """The project's drawing sets, their drawings, and each drawing's document."""
     return tuple(
         DrawingSetRecord(
             drawing_set_id=_text(row.get("id")),
@@ -183,6 +256,11 @@ def _drawing_set_records(repository, project_id) -> tuple[DrawingSetRecord, ...]
                     file_name=_text(drawing.get("file_name")),
                     storage_path=_text(drawing.get("storage_path")),
                     page_count=_int(drawing.get("page_count")),
+                    document=_document_record(
+                        repository,
+                        _text(drawing.get("id")),
+                        _text(drawing.get("document_id")),
+                    ),
                 )
                 for drawing in _rows(repository.drawings_for_drawing_set(row.get("id")))
             ),
@@ -204,9 +282,10 @@ def read_project_record(
 
     `repository` is the existing repository module (or a double standing in for
     it). It must expose `get_project`, `drawing_sets_for_project` and
-    `drawings_for_drawing_set`. It defaults to the production repository, which is
-    imported inside this function so that importing this module does not pull the
-    database client into a process that never reads one.
+    `drawings_for_drawing_set`, and — since J61 — `document_for_drawing`, which is
+    called only for a drawing whose row names a document. It defaults to the
+    production repository, which is imported inside this function so that importing
+    this module does not pull the database client into a process that never reads one.
     """
     if not (isinstance(project_id, str) and project_id.strip()):
         raise ValueError("project_id must be a non-empty str.")

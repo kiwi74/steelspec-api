@@ -70,18 +70,22 @@ from __future__ import annotations
 import json
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.cad_engine.connection_review_snapshot import (
+    CITATION_TABLE,
     ITEM_TABLE,
     SNAPSHOT_REFUSED_PROJECT_UNKNOWN,
     SNAPSHOT_REFUSED_REVISION_GAP,
     SNAPSHOT_REFUSED_UNREPRESENTABLE,
     SNAPSHOT_TABLE,
+    ReviewFieldCitation,
     ReviewSnapshot,
+    ReviewSnapshotItem,
     SnapshotRefused,
     build_review_snapshot,
+    citation_from_row,
     snapshot_from_rows,
 )
 
@@ -91,7 +95,9 @@ __all__ = [
     "WRITER_FUNCTION",
     "RecordedReviewState",
     "latest_recorded_revision",
+    "load_review_citations",
     "load_review_snapshot",
+    "persist_connection_review_citations",
     "persist_review_snapshot",
     "project_evidence_rows",
     "read_connection_review_state",
@@ -101,6 +107,12 @@ __all__ = [
 #: The one writer, by name. It is a function rather than an insert sequence because a
 #: header with half its items is a wrong revision, not a partial one.
 WRITER_FUNCTION = "record_connection_review_snapshot"
+
+#: J66's writer, by name: ONE review package's citations, INSERT only. It is a function for
+#: the same reason the writer above is — a set of citations half-written is not a partial
+#: record, it is a wrong one — and it performs no revision check of its own: the citation's
+#: revision is the ITEM's, and the composite foreign key is what enforces that.
+CITATION_WRITER_FUNCTION = "record_connection_review_citations"
 
 #: What `read_connection_review_state` says when the project has recorded nothing. J21
 #: Decision B: an existing project has NO review state, and its absence is a state the read
@@ -228,6 +240,25 @@ def _refusal_from(exc) -> SnapshotRefused | None:
     return None
 
 
+def _citation_refusal_from(exc) -> SnapshotRefused | None:
+    """The refusal a failed CITATION write IS, from the database's own words, or None.
+
+    The ownership guard (a crossed project boundary, or a reading that does not exist) and
+    the append-only trigger name themselves with a CITATION_REFUSED_ code, and that name is
+    preserved verbatim.
+
+    Everything else is re-raised unchanged, and the restraint is the point: a foreign-key
+    failure here has four possible causes — the review item, the page reading, the occurrence,
+    the document — and mapping them all onto one code would be inventing an explanation the
+    database did not give. The database's own message says which one it was.
+    """
+    fields = _error_fields(exc)
+    message = fields.get("message", "")
+    if fields.get("code") == _RAISED and message.startswith("CITATION_REFUSED_"):
+        return SnapshotRefused(message.split(":", 1)[0], message)
+    return None
+
+
 def _project_id(project_id) -> str:
     if not isinstance(project_id, str) or not project_id.strip():
         raise ValueError("project_id must be a non-empty str.")
@@ -298,6 +329,34 @@ def load_review_snapshot(
     return snapshot_from_rows(header[0], ordered)
 
 
+def load_review_citations(
+    project_id: str, review_revision: int, *, client=None
+) -> tuple[ReviewFieldCitation, ...]:
+    """One recorded revision's citations, decoded — or none when it has none recorded.
+
+    A revision recorded before the citation table existed, and every revision this system
+    recorded so far, has NONE. That is an empty tuple and not an error: it is the honest
+    answer, and the contract states it as UNCITED rather than as an absence of a claim.
+
+    It is a reader of its own rather than part of `load_review_snapshot`, deliberately: the
+    snapshot's replay is pinned to the two tables it owns (J22's own assertion), and a third
+    table read smuggled into it would make that pin false. Nothing here writes, decides or
+    advances anything.
+    """
+    store = _client(client)
+    project = _project_id(project_id)
+    if not isinstance(review_revision, int) or isinstance(review_revision, bool):
+        raise TypeError("review_revision must be an int.")
+    rows = _rows(
+        store.table(CITATION_TABLE)
+        .select("*")
+        .eq("project_id", project)
+        .eq("review_revision", review_revision)
+        .execute()
+    )
+    return tuple(citation_from_row(row) for row in rows)
+
+
 def read_connection_review_state(project_id: str, *, client=None) -> RecordedReviewState:
     """What this project's review store holds: the current revision, or its explicit absence.
 
@@ -338,6 +397,14 @@ def read_connection_review_state(project_id: str, *, client=None) -> RecordedRev
             snapshot=None,
             revisions=(),
         )
+    # J66: this revision's citations are bound onto the snapshot here, so that "the project's
+    # current recorded state" is ONE object and every reader of it gets the citations for
+    # free rather than each assembling its own. The binding is a copy of the same snapshot
+    # with one more recorded field; nothing is recomputed and no citation is invented.
+    snapshot = replace(
+        snapshot,
+        citations=load_review_citations(project, snapshot.review_revision, client=client),
+    )
     return RecordedReviewState(
         project_id=project,
         code=REVIEW_STATE_RECORDED,
@@ -405,6 +472,57 @@ def persist_review_snapshot(snapshot: ReviewSnapshot, *, client=None) -> ReviewS
     return snapshot
 
 
+def persist_connection_review_citations(
+    snapshot: ReviewSnapshot,
+    review_package_id: str,
+    *,
+    client=None,
+) -> tuple[dict, ...]:
+    """Persists ONE reviewed connection's citations, or none of them. INSERT only.
+
+    The snapshot must already exist and must already carry the citations: this function
+    builds none of them, derives none of them and takes no field, drawing or value it could
+    build one from. It is transport — J21's `citation_rows_for` produces the rows, the
+    writer function inserts them all inside one transaction, and a refusal from the database
+    comes back as the refusal it is.
+
+    There is deliberately NO caller of this function in the production path. J66 built the
+    infrastructure and left it unreachable: nothing in extraction, in the AI analysis, in
+    the review opening or in fabrication generation creates a citation, and no route exposes
+    this writer. Writing citations is a later milestone's decision, and until it is taken the
+    live table stays empty and every field reads UNCITED.
+
+    Returns the rows it sent, so a caller can chain the read that proves what was stored.
+    """
+    if not isinstance(snapshot, ReviewSnapshot):
+        raise TypeError(
+            f"snapshot must be a ReviewSnapshot (got {type(snapshot).__name__}); citations "
+            "belong to a recorded review and this function records none of them"
+        )
+    if not isinstance(review_package_id, str) or not review_package_id.strip():
+        raise ValueError("review_package_id must be a non-empty str.")
+    rows = snapshot.citation_rows_for(review_package_id)
+    if not rows:
+        # Nothing to write is not a write. A call that would insert zero rows is a no-op
+        # rather than a round trip that could report success for an empty set.
+        return ()
+    params = {
+        "p_project_id": snapshot.project_id,
+        "p_review_revision": snapshot.review_revision,
+        "p_review_package_id": review_package_id,
+        "p_citations": _json_text([dict(row) for row in rows]),
+    }
+    response = _client(client).rpc(CITATION_WRITER_FUNCTION, params)
+    try:
+        response.execute()
+    except Exception as exc:
+        refusal = _citation_refusal_from(exc)
+        if refusal is None:
+            raise
+        raise refusal from exc
+    return rows
+
+
 def record_project_review(
     binding,
     workflow,
@@ -420,9 +538,16 @@ def record_project_review(
       1. the project is the BOUND one — the caller's authorization proof, never a project id
          passed in a request body;
       2. the previous revision is the project's own highest recorded one;
-      3. J21 builds the snapshot from the workflow (and refuses a mismatch, a gap, a
-         duplicate package id or a state it cannot represent);
-      4. the database writes it, or refuses the whole revision.
+      3. the previous revision's ITEMS are read back, once, from that same revision (J77);
+      4. J21 builds the snapshot from the workflow and from those items (and refuses a
+         mismatch, a gap, a duplicate package id, a divergence from the previous revision's
+         connections or recorded candidate origins, or a state it cannot represent);
+      5. the database writes it, or refuses the whole revision.
+
+    Step 3 is the one J77 adds, and it is the only read on this path that is not the head.
+    It is performed against the revision step 2 already returned rather than against a
+    second read of the head, so the items the builder compares against and the revision it
+    expects are guaranteed to be the same revision.
 
     `binding` is a J19 `ProjectReviewBinding`. Taking the binding rather than a project id is
     the authorization boundary expressed as a type: a binding exists only for a project an
@@ -439,12 +564,36 @@ def record_project_review(
         )
     project_id = _project_id(binding.project_id)
     previous_revision = latest_recorded_revision(project_id, client=client)
+
+    # J77 — the previous revision's own items, read ONCE and read from the SAME
+    # `previous_revision` the builder is told to expect. Reading it from a second head
+    # would let the two describe different revisions, which is the confusion this
+    # argument exists to prevent.
+    #
+    # An unreadable previous revision is a REFUSAL and never a fallback to "no prior": a
+    # snapshot built as though this were revision 0 would re-address every untouched
+    # connection from the current reconstruction, which is precisely what J77 stops.
+    prior_items: dict[str, ReviewSnapshotItem] | None = None
+    if previous_revision is not None:
+        prior = load_review_snapshot(project_id, previous_revision, client=client)
+        if prior is None:
+            raise SnapshotRefused(
+                SNAPSHOT_REFUSED_UNREPRESENTABLE,
+                f"the project's review chain reaches revision {previous_revision} but that "
+                "revision could not be read back; the candidate origins it recorded cannot "
+                "be carried, and a snapshot recorded without them would state that every "
+                "connection this revision did not process is addressed at the reading that "
+                "stands for its page today, which is not what the chain recorded",
+            )
+        prior_items = {item.review_package_id: item for item in prior.items}
+
     snapshot = build_review_snapshot(
         workflow,
         project_id=project_id,
         evidence_rows=evidence_rows,
         evidence_run_ids=evidence_run_ids,
         previous_revision=previous_revision,
+        prior_items=prior_items,
     )
     return persist_review_snapshot(snapshot, client=client)
 

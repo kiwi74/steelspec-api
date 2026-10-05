@@ -481,4 +481,8 @@ def test_the_intake_module_imports_only_the_7x_review_layer_and_the_standard_lib
             imported.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module)
-    assert imported == {"copy", "collections.abc", "dataclasses", "typing", "app.cad_engine.project_connection_review"}
+    assert imported == {
+        "copy", "collections.abc", "dataclasses", "typing",
+        "app.cad_engine.candidate_origin_address",
+        "app.cad_engine.project_connection_review",
+    }

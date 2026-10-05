@@ -71,7 +71,8 @@ from app.cad_engine.review_view_model import (
 )
 
 __all__ = [
-    "SUPPORTED_ANSWER_TYPES", "render_connection_detail_page", "render_message_page",
+    "SUPPORTED_ANSWER_TYPES", "render_annotation_evidence_page",
+    "render_connection_detail_page", "render_message_page",
     "render_page_exceptions_page", "render_project_page", "render_unbound_page",
     "render_workflow_review_page", "task_input_names", "unsupported_tasks",
 ]
@@ -204,6 +205,15 @@ ol.tasks { list-style: none; margin: 0; padding: 0; counter-reset: task; }
 .unsupported { color: var(--error); font-weight: 700; }
 .file-list { font-size: 13px; color: #46566a; margin: 4px 0 0; }
 .msg-page .card { max-width: 640px; }
+table.evidence { border-collapse: collapse; width: 100%; background: var(--paper);
+        border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+table.evidence th, table.evidence td { text-align: left; vertical-align: top;
+        padding: 6px 10px; border-bottom: 1px solid #eef1f4; white-space: nowrap; }
+table.evidence th { color: var(--muted); font-weight: 600; }
+table.evidence td:last-child { white-space: normal; min-width: 220px; }
+table.evidence pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0;
+        font-size: 12px; color: #46566a; }
+table.evidence details summary { cursor: pointer; color: var(--link); }
 @media (max-width: 640px) {
   main { padding: 16px 12px 48px; }
   .summary { gap: 8px; }
@@ -720,14 +730,19 @@ def _review_sections(view):
 
 def render_workflow_review_page(view, *, identity=(), coverage=(), capture_runs=(),
                                 persisted_code="", persisted_revisions=(), persisted_view=None,
-                                limitations=(), refusal_code="", refusal_detail="",
-                                action_prefix=""):
+                                recorded_readings=(), limitations=(), refusal_code="",
+                                refusal_detail="", action_prefix=""):
     """One project's review as a page: identity, extraction coverage, the reconstructed
     queue, what can and cannot be done, and the recorded state beside it.
 
     `view` may be absent (the reconstruction refused); the recorded band is rendered
     whatever the reconstruction did, and the absence of recorded state is stated with the
     store's own code rather than filled in. Nothing here writes or reads.
+
+    `recorded_readings` (J81) arrives as `(task, field statement, evidence statement)`
+    triples already composed by the production caller, exactly as `limitations` does: the
+    two statements are engineering statements, and this layer prints and escapes what it is
+    handed without deciding anything about either.
     """
     if view is not None:
         heading = view.project_id
@@ -779,6 +794,17 @@ def render_workflow_review_page(view, *, identity=(), coverage=(), capture_runs=
         "</div>"
         for label, state, reason in limitations
     )
+    # J81: one line per persisted reading. The two statements are printed in full, and the
+    # field statement is NOT given a chip: a chip is an availability verdict, and this layer
+    # has none to give about a task's own field or about what the evidence establishes.
+    reading_items = "".join(
+        '<div class="blocker">'
+        f'<div class="head"><h3>{_esc(task)}</h3></div>'
+        f'<p class="meta">{_esc(field)}</p>'
+        f"<p>{_esc(evidence)}</p>"
+        "</div>"
+        for task, field, evidence in recorded_readings
+    )
     body = (
         "<main>"
         + _backlink(action_prefix)
@@ -805,9 +831,144 @@ def render_workflow_review_page(view, *, identity=(), coverage=(), capture_runs=
         + f'<p class="big">{_esc(persisted_code)}</p>'
         + f'<p class="note">Recorded revisions: {_esc(revisions)}</p>'
         + recorded_body
+        # J81: the recorded band's evidence half, printed only where there are persisted
+        # readings to print. Nothing is stated about a project that recorded none — the
+        # absence is already stated above, in the store's own words.
+        + (
+            "<h2>Recorded field readings</h2>"
+            '<p class="note">One line per persisted task: the field the task itself states, '
+            "beside the candidate its own item's recorded address establishes. The two are "
+            "reported separately and neither is derived from the other.</p>"
+            f'<div class="card">{reading_items}</div>'
+            if reading_items else ""
+        )
         + "</main>"
     )
     return _page(f"Review {heading}" if heading else "Review", body)
+
+
+# --------------------------------------------------------------------------------------
+# The annotation-evidence surface (J29) — the marks J28 read off a page, printed as the
+# record states them. This layer prints and escapes; every sentence that says what the
+# evidence IS comes from the composition as data, so no engineering claim is made here.
+# --------------------------------------------------------------------------------------
+_ANNOTATION_EVIDENCE_ABSENT = '<span class="note">(not stated)</span>'
+
+# The recorded fields, in the order the table prints them. They are J28's own names:
+# nothing here renames a value, and nothing here adds one.
+_ANNOTATION_EVIDENCE_HEADERS = (
+    "mark_candidate",
+    "mark_readable",
+    "annotation_x",
+    "annotation_y",
+    "operator_count",
+    "duplicate_operator_count",
+    "schedule_row_candidate",
+    "tag_box_present",
+    "leader_present",
+)
+
+
+def _annotation_evidence_rows(occurrences):
+    """One row per occurrence: the recorded fields, then the reading itself.
+
+    The cells are read in the same order as `_ANNOTATION_EVIDENCE_HEADERS`. A field the
+    record does not state is printed as absent rather than as a blank cell, so "the
+    record says nothing" never looks like "the record says nothing here either".
+    """
+    return "".join(
+        "<tr>"
+        + "".join(
+            f"<td>{_esc(cell) if cell is not None else _ANNOTATION_EVIDENCE_ABSENT}</td>"
+            for cell in (
+                occurrence.mark_candidate,
+                occurrence.mark_readable,
+                occurrence.annotation_x,
+                occurrence.annotation_y,
+                occurrence.operator_count,
+                occurrence.duplicate_operator_count,
+                occurrence.schedule_row_candidate,
+                occurrence.tag_box_present,
+                occurrence.leader_present,
+            )
+        )
+        + "<td>"
+        + "<details><summary>record</summary>"
+        + f"<pre>{_esc(occurrence.evidence_json)}</pre>"
+        + f"<pre>{_esc(occurrence.rule_set_json)}</pre>"
+        + "</details>"
+        + f'<p class="note">version {_esc(occurrence.extractor_version)} ·'
+        + f' read {_esc(occurrence.extracted_at)}</p>'
+        + f'<p class="note">page sha256 {_esc(occurrence.source_pdf_sha256)}</p>'
+        + "</td>"
+        + "</tr>"
+        for occurrence in occurrences
+    )
+
+
+def render_annotation_evidence_page(review, *, action_prefix=""):
+    """One project's recorded PDF annotation evidence, as a page.
+
+    Everything printed is the record's own, under the name it was recorded with, and a
+    field the record does not state is printed as absent. The page selector is links
+    only: this surface has no input, no form and no control that could change anything.
+    """
+    boundary = "".join(f"<p>{_esc(sentence)}</p>" for sentence in review.boundary)
+    showing = (
+        f"page {_esc(review.page_filter)}" if review.page_filter is not None else "every page"
+    )
+    state = (
+        '<section class="card attention-banner banner">'
+        '<div class="banner-label">Annotation evidence</div>'
+        f'<p class="big">{_esc(review.state_code)}</p>'
+        f"<p>{_esc(review.state_detail)}</p>"
+        "</section>"
+    )
+    if review.pages:
+        selector = '<p><a href="annotations">All pages</a> · ' + " ".join(
+            f'<a href="?page={page}">{_esc(page)}</a>' for page in review.pages
+        ) + "</p>"
+    else:
+        selector = '<p class="note">No page of this project has recorded evidence.</p>'
+    stats = (
+        _stat("Recorded occurrences", review.total_occurrences)
+        + _stat("Shown", review.shown_occurrences)
+        + _stat("Pages with evidence", len(review.pages))
+        + _stat("Drawings shown", len(review.groups))
+    )
+    groups = "".join(
+        "<section>"
+        f'<h2>Drawing {_esc(group.drawing_id)} · page {_esc(group.page_number)}</h2>'
+        f'<p class="note">{_esc(len(group.occurrences))} recorded occurrence(s) stand '
+        "for this page.</p>"
+        '<table class="evidence"><thead><tr>'
+        + "".join(f"<th>{_esc(header)}</th>" for header in _ANNOTATION_EVIDENCE_HEADERS)
+        + "<th>record</th></tr></thead><tbody>"
+        + _annotation_evidence_rows(group.occurrences)
+        + "</tbody></table>"
+        + "</section>"
+        for group in review.groups
+    )
+    body = (
+        "<main>"
+        + _backlink(action_prefix)
+        + '<header class="masthead">'
+        + '<div class="brand">SteelSpec production review</div>'
+        + f"<h1>{_esc(review.project_id)}</h1>"
+        + f'<p class="meta">PDF annotation evidence · showing {showing}</p>'
+        + "</header>"
+        + state
+        + "<h2>What this page is</h2>"
+        + f'<div class="card">{boundary}</div>'
+        + "<h2>Recorded</h2>"
+        + f'<div class="summary">{stats}</div>'
+        + "<h2>Pages</h2>"
+        + f'<div class="card">{selector}</div>'
+        + "<h2>Occurrences</h2>"
+        + (groups or '<p class="note">No occurrence is shown.</p>')
+        + "</main>"
+    )
+    return _page(f"Annotation evidence {review.project_id}", body)
 
 
 # --------------------------------------------------------------------------------------

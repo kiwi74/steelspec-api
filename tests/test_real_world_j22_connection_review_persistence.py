@@ -54,6 +54,7 @@ import pytest
 
 from app.cad_engine.automation_gate import AUTOMATION_DECISIONS
 from app.cad_engine.connection_review_snapshot import (
+    CITATION_TABLE,
     EVIDENCE_KIND,
     EVIDENCE_TABLES,
     ITEM_TABLE,
@@ -253,7 +254,11 @@ class _FakeStore:
 
     def __init__(self, projects=(PROJECT_ID,)):
         self.projects = set(projects)
-        self.tables = {SNAPSHOT_TABLE: [], ITEM_TABLE: []}
+        # J66 added a THIRD table to the review chain, and `read_connection_review_state`
+        # reads it — so the double models it, empty, exactly as the deployed database has it.
+        # Nothing else about this double changed: it still refuses every write except the one
+        # writer it knows, and the assertions above it are untouched.
+        self.tables = {SNAPSHOT_TABLE: [], ITEM_TABLE: [], CITATION_TABLE: []}
         self.calls: list[tuple] = []
         self.reads: list[tuple] = []
 
@@ -991,7 +996,14 @@ class TestARevisionIsNeverRewritten:
         source = STORE_PATH.read_text(encoding="utf-8")
         for forbidden in (".update(", ".delete(", "upsert", ".insert(", "drop ", "truncate"):
             assert forbidden not in source.lower(), forbidden
-        assert source.count(".rpc(") == 1
+        # J66 added a SECOND writer RPC — the citation writer — and nothing else. The pin stays
+        # exact: it is the two calls, in order, each naming its own constant, so a third
+        # transport (or a mutation smuggled in behind either name) fails here.
+        assert source.count(".rpc(") == 2
+        assert re.findall(r"\.rpc\(\s*([A-Za-z_][A-Za-z0-9_]*)", source) == [
+            "WRITER_FUNCTION", "CITATION_WRITER_FUNCTION",
+        ]
+        assert store.CITATION_WRITER_FUNCTION == "record_connection_review_citations"
 
     def test_the_only_write_is_the_one_writer_function(self, fake, revision_zero):
         store.persist_review_snapshot(revision_zero, client=fake)
@@ -1254,15 +1266,37 @@ class TestTheProductionBoundaryIsUnchanged:
         assert _declared_routes(production.main.app) == FROZEN_ROUTES
 
     def test_the_store_has_exactly_one_consumer(self):
-        """The persistence capability exists, and J25 made the decision this test named as
-        the next milestone's: exactly one production module consumes the store, and it is
-        the read-only review surface. It reads the store and writes nothing to it; a
-        second consumer still has to be declared here rather than appear quietly."""
+        """Every consumer of the store is named here, and which side of it they use.
+
+        J25's read surface reads it and writes nothing. J46's resumer reads the persisted
+        chain and writes nothing. J47's route is the FIRST writer side consumer this
+        application has: it is the module that reaches `record_project_review`, and it
+        does so without owning a second builder, a second chain or a second revision
+        counter — the store still has exactly one writer PATH, and one consumer of it.
+        J50's opening operation is the SECOND, and it reaches the same writer: it records
+        the reconstruction's revision-0 baseline through `record_project_review`, reads
+        the head and reads the baseline back — the same three calls, no fourth path.
+        The list stays exact, so a further consumer is declared rather than absorbed."""
         importers = []
         for path in sorted((REPO / "app").rglob("*.py")):
             if "connection_review_repository" in path.read_text():
                 importers.append(str(path.relative_to(REPO)))
-        assert importers == ["app/production_connection_review.py"], importers
+        assert importers == [
+            "app/production_connection_review.py",
+            # J46: the resumer reads the persisted chain to rebuild the current workflow.
+            # It reads only — `latest_recorded_revision` and `load_review_snapshot` — and
+            # writes nothing to the store. Declared here, as this test requires.
+            "app/production_review/project_workflow_resumption.py",
+            # J50: the baseline-opening operation. It reaches the same writer side —
+            # `record_project_review` — for the baseline J47's first resolve records over,
+            # and reads `latest_recorded_revision`, `project_evidence_rows` and
+            # `load_review_snapshot`. It owns no snapshot, no chain and no revision rule.
+            "app/production_review_opening.py",
+            # J47: the route that records a review. It calls the store's own
+            # `record_project_review` and `latest_recorded_revision` — the writer side and
+            # the reader side — and re-implements neither the snapshot nor the chain.
+            "app/production_review_resolution.py",
+        ], importers
 
     def test_the_store_opens_no_connection_at_import(self):
         """The production client is imported on use, not at module import: importing this

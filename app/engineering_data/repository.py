@@ -13,6 +13,7 @@ columns exactly as stored, and the caller treats a missing row or a NULL as the
 absence it is.
 """
 from app.engineering_data.page_extraction_capture import CAPTURE_COLUMNS
+from app.engineering_data.pdf_annotation_evidence import ANNOTATION_COLUMNS, ANNOTATION_TABLE
 from app.supabase_client import supabase
 
 
@@ -37,12 +38,24 @@ def create_drawing_set(project_id: str, name: str) -> dict:
     }).execute().data[0]
 
 
-def create_drawing(drawing_set_id: str, file_name: str, storage_path: str) -> dict:
+def create_drawing(drawing_set_id: str, file_name: str, storage_path: str,
+                   document_id: str | None = None) -> dict:
+    """One analysis lineage over a source document.
+
+    `document_id` (Milestone J61) is the durable document this lineage read. It defaults to
+    `None` so that a caller which has no document identity — a legacy path, or a double
+    standing in for this function — keeps writing exactly the row it wrote before. The
+    column is nullable for the same reason and stays nullable.
+
+    `discipline` is written here and is deliberately NOT migrated or reinterpreted by J61:
+    it is a separate, later decision (J60 section 4), and nothing in this module reads it.
+    """
     return supabase.table("drawings").insert({
         "drawing_set_id": drawing_set_id,
         "file_name": file_name,
         "storage_path": storage_path,
         "discipline": "structural",  # assumed for this milestone; multi-file discipline detection is later
+        "document_id": document_id,
     }).execute().data[0]
 
 
@@ -99,6 +112,41 @@ def insert_page_extraction_captures(rows: list[dict]) -> int:
     return len(rows)
 
 
+def insert_pdf_annotation_occurrences(rows: list[dict]) -> int:
+    """Records one PDF reading's annotation occurrences, in a SINGLE insert. Returns how many.
+
+    WIRED, by Milestone J36, at exactly one place: `app.pipeline._record_annotation_evidence`,
+    which every extraction path calls immediately after `_record_page_captures` and before
+    that run's first engineering write. J28 built this transport and bound it to nothing; J36
+    binds it, and the statement written stays the statement it was.
+
+    What J36 did NOT change is what a failure here means. The caller wraps this call — and
+    only this call — so a refusal from the J28 layers, or a store that is not present at all,
+    leaves the run exactly as it would have been: the capture is already recorded, the
+    engineering rows are written, the coverage record advances, and the page's retryability
+    is what it was. Nothing reads this table back to make an engineering decision.
+
+    One statement for the whole reading, so a reading is recorded together or not at all:
+    PostgREST executes a single insert in one transaction, and a half-recorded reading would
+    be indistinguishable from a reading that genuinely found fewer occurrences.
+
+    There is no per-row loop and no update, delete or upsert anywhere in this function — the
+    table is append-only and this is its only writer. A re-extraction under a new rule set is
+    a new `extractor_version` and therefore new rows; a RE-READ of a page is a new
+    `analysis_run_id` and therefore new rows too, which is what a retry or a repeated
+    continuation window produces. The two are different facts and the key records both.
+
+    Within one reading, two occurrences of a page that round to the same hundredth of a point
+    collide on (drawing, page, run, coordinate, version) and refuse the whole insert rather
+    than one of them being kept: silently keeping one would be silently dropping evidence.
+    That is unchanged by the attempt dimension — the run is the same for both rows.
+    """
+    if not rows:
+        return 0
+    supabase.table("pdf_annotation_occurrences").insert(rows).execute()
+    return len(rows)
+
+
 def insert_review_items(rows: list[dict]) -> None:
     if rows:
         supabase.table("review_items").insert(rows).execute()
@@ -141,6 +189,229 @@ def update_project_summary(project_id: str, **fields) -> None:
 
 
 # =============================================================================
+# Project documents (Milestone J61) — the durable identity of one source document.
+# =============================================================================
+# J60 established the distinction this section exists to make storable:
+#
+#     project  = the real job
+#     document = one source document belonging to that job
+#     drawing  = one analysis lineage over a document
+#
+# Before J61 the only thing standing for "which document" was a `drawings` row, which is
+# created afresh by EVERY whole-document run (`create_drawing` above). That made a repeated
+# extraction of one document indistinguishable from a second document — the condition
+# `plan_continuation` refuses with CONTINUATION_DRAWING_SET_UNRESOLVED. A document row is a
+# fact about the FILE; a drawing row is a fact about an ATTEMPT at reading it.
+#
+# IDENTITY IS CONTENT. A document's identity is `(project_id, content_sha256)` — the
+# SHA-256 of its own bytes, computed by the one hashing rule the drawing-reading extractor
+# exposes as `source_document_sha256`, and called from the pipeline. This module never
+# imports that rule: it is handed a hash or it is handed nothing. The filename, the
+# storage path and the page count are ATTRIBUTES: they are recorded, and they are never
+# what makes two documents the same or different.
+#
+# NULL IS NOT A WILDCARD. A document whose bytes were never hashed — every document that
+# existed before J61, and every DXF project, which has no document row at all — carries
+# `content_sha256 = NULL`, which means IDENTITY NOT PROVEN. No caller may read it as
+# "matches anything", and nothing in this module returns one document for another on the
+# strength of it.
+#
+# ROLE IS ASSERTED, NEVER INFERRED. Nothing here derives a role from a filename, a page
+# count, a drawing title, a path or any model output, and there is no code in this
+# milestone that assigns one: every document created by J61 is UNKNOWN, and a role is a
+# later, human-supplied fact.
+
+#: The document roles J60's design identifies. A vocabulary, not a decision: J61 stores
+#: UNKNOWN for every document it creates, and nothing in this codebase chooses one.
+DOCUMENT_ROLES = (
+    "TRANSMITTAL",
+    "STRUCTURAL_GA",
+    "ASSEMBLY",
+    "FABRICATION",
+    "ISOMETRIC",
+    "DETAIL",
+    "SCHEDULE",
+    "SPECIFICATION",
+    "ARCHITECTURAL",
+    "UNKNOWN",
+)
+
+#: What a document's role is until a human says otherwise.
+DOCUMENT_ROLE_UNKNOWN = "UNKNOWN"
+
+#: The columns a document is read back as. Explicit rather than "*", like every other read
+#: in this module: a caller gets exactly the persisted facts and cannot quietly acquire a
+#: decision.
+DOCUMENT_COLUMNS = (
+    "id,project_id,storage_path,file_name,source_format,byte_size,page_count,"
+    "content_sha256,role,revision_label,supersedes_document_id,created_at"
+)
+
+
+def _document_for_content(project_id: str, content_sha256: str) -> dict | None:
+    """The document of this project with exactly these bytes, or None.
+
+    The `(project_id, content_sha256)` lookup is the identity rule itself, so it lives in
+    one place. It is only ever asked a NON-NULL hash: a NULL hash proves nothing about
+    sameness and must never select a row.
+    """
+    rows = (
+        supabase.table("project_documents")
+        .select(DOCUMENT_COLUMNS)
+        .eq("project_id", project_id)
+        .eq("content_sha256", content_sha256)
+        .execute()
+        .data
+    ) or []
+    return rows[0] if rows else None
+
+
+def create_project_document(project_id: str, *, storage_path: str, file_name: str,
+                            source_format: str | None = None, byte_size: int | None = None,
+                            page_count: int | None = None, content_sha256: str | None = None,
+                            role: str = DOCUMENT_ROLE_UNKNOWN,
+                            revision_label: str | None = None,
+                            supersedes_document_id: str | None = None) -> dict:
+    """The project's document identity for these bytes — created once, never duplicated.
+
+    IDEMPOTENT BY CONTENT. When `content_sha256` is given and a document of this project
+    already carries it, that row is returned and nothing is inserted: re-reading the same
+    file is the same document, however many times it is read. That is the property that
+    makes a repeated extraction a repeat rather than a second document. The database holds
+    the same rule as a partial unique index, so two runs racing to insert one document
+    cannot both succeed; the loser re-reads and returns the winner's row.
+
+    A document is NEVER created from a path alone when a hash is available, and NOTHING here
+    hashes anything: the caller supplies `content_sha256`, because the caller is the only
+    place the document's bytes are in hand. A caller with no proven hash passes `None` and
+    gets a document whose identity is explicitly unproven.
+
+    `page_count` is the document's own count when the caller already knows it, and `None`
+    otherwise — never a guess, and never 0 to stand in for one.
+    """
+    if content_sha256 is not None:
+        existing = _document_for_content(project_id, content_sha256)
+        if existing is not None:
+            return existing
+
+    row = {
+        "project_id": project_id,
+        "storage_path": storage_path,
+        "file_name": file_name,
+        "source_format": source_format,
+        "byte_size": byte_size,
+        "page_count": page_count,
+        "content_sha256": content_sha256,
+        "role": role,
+        "revision_label": revision_label,
+        "supersedes_document_id": supersedes_document_id,
+    }
+    try:
+        return supabase.table("project_documents").insert(row).execute().data[0]
+    except Exception:
+        # The unique index on (project_id, content_sha256) refused a concurrent identical
+        # insert. The identity is the pair, so the row that won IS this document.
+        if content_sha256 is not None:
+            existing = _document_for_content(project_id, content_sha256)
+            if existing is not None:
+                return existing
+        raise
+
+
+def project_documents_for_project(project_id: str) -> list[dict]:
+    """Every source document this project has, as its own rows state them.
+
+    Ordered by creation, which is the order they were first read in — an ordering of
+    RECORDED FACT and not a ranking: nothing here says the first is authoritative, and no
+    caller may read it as a preference. A project with more than one document is not
+    ambiguous to this function; it is ambiguous to a caller that has not said which one it
+    means.
+    """
+    return (
+        supabase.table("project_documents")
+        .select(DOCUMENT_COLUMNS)
+        .eq("project_id", project_id)
+        .order("created_at")
+        .execute()
+        .data
+    ) or []
+
+
+def document_for_drawing(drawing_id: str) -> dict | None:
+    """The document one analysis lineage read, or None when it names none.
+
+    The hop J60 identified as already sufficient for document provenance: `drawings
+    .document_id` is the only edge that had to be added, and every evidence row reaches its
+    document through the drawing it already names (`source_drawing_id`). `None` is the
+    honest answer for a drawing created before J61 or by the DXF path, and it is the absence
+    of a document rather than a blank one.
+    """
+    drawings = (
+        supabase.table("drawings")
+        .select("document_id")
+        .eq("id", drawing_id)
+        .execute()
+        .data
+    ) or []
+    if not drawings:
+        return None
+    document_id = drawings[0].get("document_id")
+    if not document_id:
+        return None
+    rows = (
+        supabase.table("project_documents")
+        .select(DOCUMENT_COLUMNS)
+        .eq("id", document_id)
+        .execute()
+        .data
+    ) or []
+    return rows[0] if rows else None
+
+
+def update_document_role(project_id: str, document_id: str, role: str) -> dict | None:
+    """Records the role a human ASSERTED for one of THIS PROJECT's documents.
+
+    Milestone J64, and the only write a role has ever had here: one column, set to the
+    value the caller asserted. It is scoped by the PAIR — the id and the project the
+    document belongs to — because a document is only ever reachable through its project,
+    and a caller that named the wrong project updates nothing rather than rewriting
+    another project's document. The database's own CHECK is the last barrier behind the
+    vocabulary check the boundary performs, and it stays exactly as J61 declared it.
+
+    Nothing else is written. `storage_path`, `file_name`, `content_sha256`, `page_count`,
+    `revision_label` and `supersedes_document_id` are untouched, no row is inserted, none
+    is deleted and no revision of any kind is created: a role is a fact about the
+    document, not a new version of it.
+
+    Returns the row the store itself reports after the write, or `None` when no document
+    of this project carries that id — so the caller is told what the database did rather
+    than what it was asked to do.
+    """
+    rows = (
+        supabase.table("project_documents")
+        .update({"role": role})
+        .eq("id", document_id)
+        .eq("project_id", project_id)
+        .execute()
+        .data
+    ) or []
+    return rows[0] if rows else None
+
+
+def update_document_page_count(document_id: str, page_count: int | None) -> None:
+    """Records the document's own page count once a reading has established it.
+
+    Only the count, and only ever the count the run actually established: the column is
+    nullable and `None` is stored as the absence it is, exactly as `update_drawing_meta`
+    treats the same fact on the drawing. No other field of a document is rewritten — an
+    identity is not a thing to be updated.
+    """
+    supabase.table("project_documents").update({"page_count": page_count}).eq(
+        "id", document_id
+    ).execute()
+
+
+# =============================================================================
 # Reads (Milestone J16) — what a continuation must know before it adds to it.
 # =============================================================================
 # The column lists are explicit rather than "*": this module returns exactly the
@@ -172,10 +443,16 @@ def drawing_sets_for_project(project_id: str) -> list[dict]:
 
 
 def drawings_for_drawing_set(drawing_set_id: str) -> list[dict]:
-    """The drawings of one drawing set, with the source file each was read from."""
+    """The drawings of one drawing set, with the source file each was read from.
+
+    `document_id` (Milestone J61) is read beside `storage_path` and `page_count` because it
+    is the same kind of fact: a property of the row as stored. It is NULL for a drawing
+    created before J61 and for a drawing that named no document, and a caller must read that
+    NULL as "no document is named here" rather than as any particular document.
+    """
     return (
         supabase.table("drawings")
-        .select("id,drawing_set_id,file_name,storage_path,page_count")
+        .select("id,drawing_set_id,file_name,storage_path,page_count,document_id")
         .eq("drawing_set_id", drawing_set_id)
         .execute()
         .data
@@ -261,6 +538,36 @@ def page_extraction_captures_for_drawing(drawing_id: str) -> list[dict]:
         supabase.table("page_extraction_captures")
         .select(",".join(CAPTURE_COLUMNS))
         .eq("drawing_id", drawing_id)
+        .execute()
+        .data
+    ) or []
+
+
+# =============================================================================
+# Reads (Milestone J29) — the recorded PDF annotation evidence, read back.
+# =============================================================================
+# J28 built the annotation evidence layer; J36 later bound its write transport to the
+# extraction pipeline, so this table is now written by runs. This is the read half of the
+# same boundary: one statement, one project, the columns the storage rules declare and no
+# others. Nothing here decides anything — in particular it does not decide which reading
+# stands for a page. That rule is `authoritative_occurrences` in the storage layer, and a
+# caller that skipped it would be reading superseded readings as though they were current.
+
+def pdf_annotation_occurrences_for_project(project_id: str) -> list[dict]:
+    """Every recorded PDF annotation occurrence of this project, every reading included.
+
+    One project, all of its drawings, all pages, all attempts — the rows the evidence
+    layer recorded, returned exactly as stored. Which of them stand for a page is not
+    decided here: `app.engineering_data.pdf_annotation_evidence.authoritative_occurrences`
+    is the only thing that decides it, and it is the only thing that should.
+
+    An occurrence is a mark drawn on a page. This read returns no member, no placement
+    and no identity of any kind, because the table holds none.
+    """
+    return (
+        supabase.table(ANNOTATION_TABLE)
+        .select(",".join(ANNOTATION_COLUMNS))
+        .eq("project_id", project_id)
         .execute()
         .data
     ) or []

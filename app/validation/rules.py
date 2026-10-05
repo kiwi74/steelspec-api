@@ -33,6 +33,33 @@ TIMBER_KEYWORDS = [
 ]
 TIMBER_PATTERN = re.compile("|".join(re.escape(k) for k in TIMBER_KEYWORDS), re.IGNORECASE)
 
+# === Non-steel material detection: AS/NZS softwood stress grades (F-grades) ===
+# A second, deliberately narrower signal, for the same reason the keyword list
+# above is deliberately narrow. A graded softwood section is called out with a
+# stress grade — "3/240x45 F27", "2/200x45 F27" — and none of the keywords above
+# appears in it, so those callouts were being read as unmatched STEEL. But the
+# bare token "F8"/"F11"/"F17" is also a perfectly ordinary MEMBER MARK: this
+# project's own corpus carries steel members marked F1, F2, F3, F6, F11 and F12.
+# Matching an F-number on its own would turn six real steel members into timber.
+#
+# What separates the two is the section size: an F-grade only means a stress
+# grade when it is attached to a dimension pair, and that pair is the anchor
+# here. The anchor is deliberately tight — the grade must follow the size with
+# nothing but whitespace between them — because an open middle would let a
+# steel callout through ("200x200x6 SHS F17" must NOT be timber; the loose form
+# of this pattern reads it as one).
+#
+# The enumerated grades are the standard softwood family. Listing them rather
+# than accepting any \d+ is what keeps a section-shaped token with some other
+# suffix out, and it is why F6 and F12 — the marks that exist in the corpus and
+# are NOT grades in this family — cannot collide with a real one.
+STRESS_GRADES = ["F4", "F5", "F7", "F8", "F11", "F14", "F17", "F22", "F27", "F34"]
+STRESS_GRADE_PATTERN = re.compile(
+    r"(?<![\w.])\d{2,3}\s*[xX]\s*\d{2,3}\s*"
+    r"(?:" + "|".join(re.escape(g) for g in STRESS_GRADES) + r")(?![\w.])",
+    re.IGNORECASE,
+)
+
 # A looser hint pattern than the strict section matcher's regex —
 # used only to catch a section size accidentally folded into the mark
 # field itself (e.g. "P1 89x5 SHS" instead of mark="P1"). Being a bit
@@ -103,7 +130,8 @@ class ValidationIssue:
 
 
 def is_timber_or_non_steel(raw_text: str) -> bool:
-    return bool(TIMBER_PATTERN.search(raw_text or ""))
+    text = raw_text or ""
+    return bool(TIMBER_PATTERN.search(text) or STRESS_GRADE_PATTERN.search(text))
 
 
 def fold_mark_format_anomalies(raw_members: list[dict]) -> list[dict]:

@@ -29,6 +29,13 @@ from pypdf import PdfReader
 
 from app.config import ANTHROPIC_API_KEY, PDF_VISION_MODEL
 from app.engineering_data.repository import upload_page_image
+# Wave 3J Phase B — these two conditions previously raised a bare `RuntimeError`,
+# which made them indistinguishable by type from each other and from anything else
+# in the process. Both subclass `RuntimeError`, so every existing handler (and every
+# existing `except RuntimeError`) still catches them and no control flow changed;
+# what changed is that the two conditions are now separately nameable, which is
+# what lets a persistence boundary classify them without reading their text.
+from app.validation.failure_classification import ProviderNotConfigured, SourceUnreadable
 
 EXTRACTION_SYSTEM_PROMPT = """You are analysing a structural engineering or architectural drawing page for steel fabrication information.
 
@@ -168,7 +175,7 @@ def analyze_pdf_pages(
     exactly as it was.
     """
     if not ANTHROPIC_API_KEY:
-        raise RuntimeError(
+        raise ProviderNotConfigured(
             "PDF drawing analysis requires ANTHROPIC_API_KEY to be set on the API service. "
             "Get one at console.anthropic.com and add it as a Railway environment variable."
         )
@@ -176,7 +183,7 @@ def analyze_pdf_pages(
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
     pages = render_pages_to_png(filepath, max_pages, first_page=first_page)
     if not pages:
-        raise RuntimeError("Could not render any pages from this PDF.")
+        raise SourceUnreadable("Could not render any pages from this PDF.")
 
     results: list[PageExtraction] = []
 

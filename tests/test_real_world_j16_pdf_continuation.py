@@ -251,8 +251,8 @@ class _ServingRepository(j4._RecordingRepository):
         super().update_drawing_set(drawing_set_id, **fields)
         self.drawing_sets[drawing_set_id].update(fields)
 
-    def create_drawing(self, drawing_set_id, file_name, storage_path):
-        row = super().create_drawing(drawing_set_id, file_name, storage_path)
+    def create_drawing(self, drawing_set_id, file_name, storage_path, document_id=None):
+        row = super().create_drawing(drawing_set_id, file_name, storage_path, document_id)
         row = {**row, "file_name": file_name, "storage_path": storage_path, "page_count": None}
         self.drawings[row["id"]] = row
         return row
@@ -333,11 +333,39 @@ class _ServingRepository(j4._RecordingRepository):
 
     def drawings_for_drawing_set(self, drawing_set_id):
         self.reads.append("drawings_for_drawing_set")
-        columns = ("id", "drawing_set_id", "file_name", "storage_path", "page_count")
+        # The columns the production select names, and J61 added `document_id` to that list.
+        # Serving the older five would let a caller start depending on an unselected column
+        # and pass here while seeing None in production — which is the failure this double's
+        # own doctrine exists to catch.
+        columns = ("id", "drawing_set_id", "file_name", "storage_path", "page_count",
+                   "document_id")
         return [
             {name: row.get(name) for name in columns}
             for row in self.drawings.values() if row.get("drawing_set_id") == drawing_set_id
         ]
+
+    def document_for_drawing(self, drawing_id):
+        """The document THIS lineage names, answered from the documents the run created.
+
+        Milestone J61. The read is two hops in production — the drawing's own
+        `document_id`, then the document row — and the double keeps the same two:
+        the drawing row it recorded, then the document that same run created. A
+        drawing that names nothing (none created before J61, none on the DXF path)
+        answers None rather than a blank row, which is the production contract.
+        """
+        self.reads.append("document_for_drawing")
+        drawing = self.drawings.get(drawing_id) or {}
+        document_id = drawing.get("document_id")
+        if not document_id:
+            return None
+        # The columns the production select names, and no more.
+        columns = ("id", "project_id", "storage_path", "file_name", "source_format",
+                   "byte_size", "page_count", "content_sha256", "role", "revision_label",
+                   "supersedes_document_id", "created_at")
+        for row in self.documents:
+            if row.get("id") == document_id:
+                return {name: row.get(name) for name in columns}
+        return None
 
     def member_rows_for_project(self, project_id):
         self.reads.append("member_rows_for_project")
@@ -1376,14 +1404,31 @@ class TestScopeAndPurity:
         rule — `check_page_window` is untouched, and a window's arithmetic is the
         same arithmetic over a schema that now also remembers what was read.
 
-        The five names are pinned exactly, and a sixth appearing unremarked still
-        fails here."""
+        J28 added a sixth, and it is not this milestone's either: it records PDF
+        annotation occurrences read from the drawing, it names no page window,
+        and nothing in `app/` reads it. A window's arithmetic is still the same
+        arithmetic. (J28A is the bookkeeping step that recorded the name here.)
+
+        J44 added a seventh, and it is not this milestone's either: it places one
+        project-keyed row naming who is reviewing a project and until when. It
+        names no window and records no reading, so a window's arithmetic is still
+        the same arithmetic. J61 added an eighth, which is not this milestone's
+        either: it gives one source document an identity and points a drawing at
+        it. It moves no window, adds no page to one and records no reading, so the
+        arithmetic this file asserts is untouched.
+
+        The eight names are pinned exactly, and a ninth appearing unremarked
+        still fails here."""
         assert set(j13.MIGRATIONS) == {
             "20260924000000_j5_section_resolution_truth.sql",
             "20260924010000_j6_reference_data_identity.sql",
             "20260924020000_j8b_connection_plate_evidence_nullability.sql",
             "20260925000000_j22_connection_review_persistence.sql",
             "20260925010000_j23_page_extraction_captures.sql",
+            "20260927000000_j28_pdf_annotation_occurrences.sql",
+            "20260928000000_j44_project_review_claims.sql",
+            "20260929000000_j61_project_documents.sql",
+            "20260929010000_j66_field_evidence_citations.sql",
         }
         migrations = sorted(path.name for path in (REPO / "supabase" / "migrations").glob("*.sql"))
         assert migrations == sorted(j13.MIGRATIONS)

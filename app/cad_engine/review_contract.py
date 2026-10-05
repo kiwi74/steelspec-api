@@ -94,6 +94,7 @@ from app.cad_engine.reviewed_connection_specification import (
     PROVENANCE_AI_EXTRACTED,
     PROVENANCE_HUMAN_REVIEWED,
     PROVENANCE_HUMAN_SUPPLEMENTED,
+    REQUIRED_PROVENANCE_FIELDS,
 )
 
 __all__ = [
@@ -101,8 +102,12 @@ __all__ = [
     "SEVERITY_BLOCKING", "SEVERITY_WARNING",
     "PROVENANCE_LABELS", "REVIEW_CONTRACT_SCOPE_STATEMENT",
     "ReviewBlockerInfo", "ReviewEvidenceInfo", "ReviewFieldProvenance",
+    "ReviewFieldCitationInfo", "ReviewFieldStanding",
+    "ENGINEERING_FIELDS", "CITATION_KINDS",
+    "STANDING_UNCITED", "STANDING_DIRECT", "STANDING_DERIVED",
     "ReviewTaskInfo", "ConnectionReviewContract", "ProjectReviewContract",
     "build_connection_review_contract", "build_project_review_contract",
+    "field_standings",
 ]
 
 # --------------------------------------------------------------------------------------
@@ -257,6 +262,35 @@ _PROVENANCE_FIELD_ORDER = (
     "connected_member_marks", "position", "plate", "holes", "location", "attachments",
 )
 
+# --------------------------------------------------------------------------------------
+# The citation vocabulary (J66).
+#
+# ENGINEERING_FIELDS is the fields a citation may address, and it is deliberately NOT a new
+# list: it is the SAME expression the review package publishes
+# (`app/cad_engine/connection_review_package.py`, `REQUIRED_PROVENANCE_FIELDS + ("material",)`),
+# taken from the one authoritative list of provenance-required fields that this module already
+# imports. The J66 tests pin this expression, that module's own constant and the SQL CHECK in
+# the J66 migration `20260929010000_j66_field_evidence_citations.sql` all equal, so a field
+# added to one of the three cannot silently disagree with the other two.
+# --------------------------------------------------------------------------------------
+ENGINEERING_FIELDS = REQUIRED_PROVENANCE_FIELDS + ("material",)
+
+# How a citation relates to the reading it names. SOURCE is the reading a field's content was
+# taken from; DERIVATION is a reading it was computed or interpreted from. The pair is CLOSED
+# and carries no quality, no confidence, no rank and no precedence — which of two sources is
+# better is a question this milestone deliberately did not answer.
+CITATION_SOURCE = "SOURCE"
+CITATION_DERIVATION = "DERIVATION"
+CITATION_KINDS = (CITATION_SOURCE, CITATION_DERIVATION)
+
+# A field's DERIVED citation standing. Computed from the citations and NEVER stored, so it
+# cannot become a second fact that disagrees with the ones it is derived from. There is
+# deliberately no INFERRED standing: this system records no inference, and a state naming one
+# would claim a provenance nothing in the record supports.
+STANDING_UNCITED = "UNCITED"
+STANDING_DIRECT = "DIRECT"
+STANDING_DERIVED = "DERIVED"
+
 
 # --------------------------------------------------------------------------------------
 # The immutable contract models.
@@ -302,6 +336,60 @@ class ReviewFieldProvenance:
 
 
 @dataclass(frozen=True)
+class ReviewFieldCitationInfo:
+    """
+    ONE recorded citation of one engineering field, presented for a human: WHERE that
+    field's content is accounted for — never what the content is.
+
+    There is no value, no chosen value, no confidence, no rank and no winner here, because a
+    citation is an ADDRESS. The content stays in exactly one copy, in the immutable reading
+    the citation names, and reading it is the reader's own act through the evidence surface.
+    A copy here would be a second truth that could disagree with the first, undetectably.
+
+    `document_id` is None when the cited reading predates document identity or was taken
+    without it. None is NOT a wildcard: it matches nothing, and no reader may treat it as
+    "any document".
+
+    `annotation_x`, `annotation_y` and `extractor_version` are all present or all None. A
+    position is never stated without the rule set it was read under, because the pair is
+    what makes the occurrence an identity rather than a coordinate.
+
+    `anchor` is the locator WITHIN the cited reading as a display string — the drawn token,
+    the detail reference, the nearby text. It is an attribute of the address.
+
+    `ordinal` is the citation's RECORDING ORDER within its field, and nothing else: it is
+    never a priority, a preference or a rank, and it is compared with no other quantity.
+    """
+
+    field: str
+    ordinal: int
+    citation_kind: str
+    document_id: str | None
+    drawing_id: str
+    page_number: int
+    analysis_run_id: str
+    annotation_x: str | None
+    annotation_y: str | None
+    extractor_version: str | None
+    anchor: str
+
+
+@dataclass(frozen=True)
+class ReviewFieldStanding:
+    """
+    One engineering field's DERIVED citation standing: DIRECT when every citation of it is a
+    SOURCE, DERIVED when any citation of it is a DERIVATION (a mix fails closed to the weaker
+    standing), UNCITED when it has no citation at all.
+
+    It is computed for EVERY engineering field, so a field that is uncited is stated rather
+    than omitted, and it is never persisted — the citations remain the only stored fact.
+    """
+
+    field: str
+    standing: str
+
+
+@dataclass(frozen=True)
 class ReviewTaskInfo:
     """
     One existing human-resolution task, presented for a UI control. `description`
@@ -341,8 +429,10 @@ class ConnectionReviewContract:
     processed), whether a human needs to act on it, its blocker and warning
     presentations, the AI's extracted values verbatim, the extraction evidence,
     the field provenance, the existing resolution tasks, the actions actually
-    valid right now, and the artifacts it produced. No internal package,
-    pipeline or gate object is exposed.
+    valid right now, the artifacts it produced, and — where any have been
+    recorded — the citations of this connection's engineering fields with the
+    standing each field's citations derive. No internal package, pipeline or
+    gate object is exposed.
     """
     package_id: str
     connection_id: str | None
@@ -370,6 +460,12 @@ class ConnectionReviewContract:
     generated_files: tuple[str, ...]
     last_processed_revision: int | None
     summary: str
+    # J66, both defaulted so every existing construction of this contract is unchanged: an
+    # empty tuple is the honest statement for a revision whose citations were never recorded
+    # (and for one read by a caller that does not load them), and `field_standings` is
+    # derived for every engineering field whatever the citations say.
+    field_citations: tuple[ReviewFieldCitationInfo, ...] = ()
+    field_standings: tuple[ReviewFieldStanding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -465,6 +561,91 @@ def _provenance_infos(provenance: dict[str, str]) -> tuple[ReviewFieldProvenance
         for field_name in sorted(name for name in provenance if name not in _PROVENANCE_FIELD_ORDER)
     )
     return ordered + rest
+
+
+def _citation_infos(citations) -> tuple[ReviewFieldCitationInfo, ...]:
+    """
+    The citations of ONE connection, in the order the contract presents them: the fixed field
+    order first, then any remaining fields sorted, and by ORDINAL within each field — the same
+    ordering rule the provenance labels already follow.
+
+    The input is whatever the read path decoded, in whatever order it arrived. The sort is
+    total, so two builds over the same recorded rows produce the same sequence; a stable
+    presentation is what lets a UI diff two revisions without reordering noise.
+
+    Ordinal orders the citations OF ONE FIELD and is compared with nothing else. It is a
+    RECORDING ORDER, not a priority: the contract makes no claim that the first citation of a
+    field is better than the second, and no reader may infer one.
+    """
+    by_field: dict[str, list] = {}
+    for citation in citations:
+        by_field.setdefault(citation.field_name, []).append(citation)
+    ordered: list = []
+    for field_name in _PROVENANCE_FIELD_ORDER:
+        ordered.extend(sorted(by_field.pop(field_name, ()), key=lambda entry: entry.ordinal))
+    for field_name in sorted(by_field):
+        ordered.extend(sorted(by_field.pop(field_name), key=lambda entry: entry.ordinal))
+    return tuple(
+        ReviewFieldCitationInfo(
+            field=citation.field_name,
+            ordinal=citation.ordinal,
+            citation_kind=citation.citation_kind,
+            document_id=citation.document_id,
+            drawing_id=citation.drawing_id,
+            page_number=citation.page_number,
+            analysis_run_id=citation.analysis_run_id,
+            annotation_x=_display(citation.annotation_x),
+            annotation_y=_display(citation.annotation_y),
+            extractor_version=citation.extractor_version,
+            anchor=_display(citation.anchor),
+        )
+        for citation in ordered
+    )
+
+
+def field_standings(citations) -> tuple[ReviewFieldStanding, ...]:
+    """
+    EVERY engineering field's derived citation standing, in the field vocabulary's own order,
+    so a field with no citations is stated as UNCITED rather than omitted.
+
+    The rule, and it fails closed in both directions:
+
+      * a field whose citations include ANY derivation is DERIVED, whatever else it has — a
+        mixed SOURCE/DERIVATION field takes the WEAKER standing, so a derivation can never be
+        presented as though the content were taken directly from a reading;
+      * a field whose citations are all SOURCE is DIRECT;
+      * a field with no citations is UNCITED;
+      * a citation kind this module does not recognise is treated as a derivation rather than
+        skipped, so an unknown kind can never make a field look more directly sourced than it
+        is. (The citation table's CHECK refuses an unknown kind outright; this is the second
+        line, not the first.)
+
+    A citation of a field OUTSIDE the vocabulary is refused rather than ignored: silently
+    dropping it would compute a standing over a record this module cannot read, and the
+    standing would then be a claim about evidence it never saw.
+    """
+    kinds: dict[str, list[str]] = {}
+    for citation in citations:
+        if citation.field_name not in ENGINEERING_FIELDS:
+            raise ValueError(
+                f"{citation.field_name!r} is not an engineering field of this contract "
+                f"(fields: {list(ENGINEERING_FIELDS)}); a standing is never computed over a "
+                "citation this module cannot read."
+            )
+        kinds.setdefault(citation.field_name, []).append(citation.citation_kind)
+    return tuple(
+        ReviewFieldStanding(field_name, _standing_of(kinds.get(field_name, ())))
+        for field_name in ENGINEERING_FIELDS
+    )
+
+
+def _standing_of(kinds) -> str:
+    """One field's standing from its citation kinds. See `field_standings` for the rule."""
+    if not kinds:
+        return STANDING_UNCITED
+    if any(kind != CITATION_SOURCE for kind in kinds):
+        return STANDING_DERIVED
+    return STANDING_DIRECT
 
 
 # --------------------------------------------------------------------------------------
@@ -592,6 +773,13 @@ def build_connection_review_contract(workflow, package_id) -> ConnectionReviewCo
         generated_files=state.generated_files,
         last_processed_revision=state.last_processed_revision,
         summary="; ".join(parts),
+        # J66. The LIVE band has no citations and can have none: a citation is a PERSISTED
+        # fact, recorded against a stored revision, and nothing in this process invents one.
+        # So every field's standing here is UNCITED — which is exactly what the recorded band
+        # says for a revision that recorded no citations, so the two bands agree by
+        # construction rather than by convention.
+        field_citations=(),
+        field_standings=field_standings(()),
     )
 
 

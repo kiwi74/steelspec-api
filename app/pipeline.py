@@ -11,11 +11,23 @@ Kept as a single top-level module rather than nested under any one
 of the three stages, since it depends on all of them and belongs to
 none.
 """
+import logging
 from dataclasses import dataclass
 
 from app.ai_analysis.pdf_vision_analyzer import analyze_pdf_pages, page_count_of
+from app.drawing_reading.pdf_annotation_extractor import (
+    AnnotationExtractionRefused,
+    extract_annotations,
+    source_bytes,
+    source_document_sha256,
+)
 from app.engineering_data import repository as repo
 from app.engineering_data.page_extraction_capture import capture_rows
+from app.production_extraction_source import SourceDocument, resolve_extraction_source
+from app.engineering_data.pdf_annotation_evidence import (
+    AnnotationEvidenceRefused,
+    occurrence_rows,
+)
 from app.engineering_data.section_matcher import SectionMatcher, reference_data_projection
 from app.validation.page_coverage import (
     COVERAGE_PREFIX,
@@ -47,6 +59,10 @@ from app.validation.parse_failures import (
     failures_of,
     parse_failures_from_warnings,
 )
+from app.validation import connection_type_accounting
+# Wave 3J Phase B — the persisted failure classification. `safe_failure_message` is the
+# only value these boundaries may put into an `error_message` column.
+from app.validation.failure_classification import safe_failure_message
 from app.validation.project_status import derive_project_status, review_status_of
 from app.validation.rules import (
     SUBSTITUTION_NOTE,
@@ -54,6 +70,14 @@ from app.validation.rules import (
     validate_extraction,
 )
 from app.config import PDF_VISION_MODEL, MAX_PDF_PAGES
+
+# Wave 3H Phase A — the module logger for this process's operator diagnostics.
+#
+# Deliberately unconfigured, for the reason stated at the same line in `app/main.py`:
+# the standard library's last-resort handling routes WARNING and above to stderr, and
+# uvicorn's default configuration leaves the root logger alone. No handler is attached
+# here and none is needed.
+logger = logging.getLogger(__name__)
 
 
 # ======================================================================================
@@ -192,10 +216,44 @@ def parse_pdf_and_save(filepath: str, project_id: str, user_id: str, storage_pat
     import os
     file_name = os.path.basename(storage_path)
 
+    # Milestone J61 — the DOCUMENT this run reads, recorded before the lineage that reads it.
+    #
+    # The order is the whole of the design. A `drawings` row is created afresh by every
+    # whole-document run, so it can never be the identity of a document; the document row is
+    # therefore created FIRST, from the file's own bytes, and the drawing is created
+    # pointing at it. Re-reading the same file resolves to the same document row, so a
+    # repeated run is a repeat rather than a second document.
+    #
+    # The bytes are read once, here, from the file this run was handed — the same file
+    # `_run_pipeline` will render. No second download is performed and no second hashing
+    # rule is introduced: `source_document_sha256` is the J28 rule, over the J28 bytes.
+    #
+    # A source that cannot be read is NOT given an identity. A hash is never fabricated and
+    # a document is never created from an unproven one, so the run continues with no
+    # document — which is exactly the state every extraction was in before this milestone —
+    # and fails downstream at the same point it always did.
+    document_id = None
+    try:
+        payload = source_bytes(filepath)
+    except AnnotationExtractionRefused:
+        payload = None
+    if payload is not None:
+        document = repo.create_project_document(
+            project_id,
+            storage_path=storage_path,
+            file_name=file_name,
+            source_format="PDF",
+            byte_size=len(payload),
+            page_count=None,  # the document's own count is established by the reading, below
+            content_sha256=source_document_sha256(payload),
+        )
+        document_id = document["id"]
+
     drawing_set = repo.create_drawing_set(project_id, file_name)
     drawing_set_id = drawing_set["id"]
 
-    drawing = repo.create_drawing(drawing_set_id, file_name, storage_path)
+    drawing = repo.create_drawing(drawing_set_id, file_name, storage_path,
+                                  document_id=document_id)
     drawing_id = drawing["id"]
 
     analysis_run = repo.create_analysis_run(drawing_set_id, PDF_VISION_MODEL)
@@ -207,8 +265,26 @@ def parse_pdf_and_save(filepath: str, project_id: str, user_id: str, storage_pat
             analysis_run_id=analysis_run_id,
         )
     except Exception as e:
-        repo.update_analysis_run(analysis_run_id, status="failed", error_message=str(e)[:500])
-        repo.update_drawing_set(drawing_set_id, status="failed", error_message=str(e)[:500])
+        # Wave 3H Phase A — the operator diagnostic destination for this boundary.
+        #
+        # This handler marks the run and the set failed and then re-raises, so the same
+        # exception also reaches `run_extraction`'s handler and is logged there too. Two
+        # records for one failure is intended: they are two facts about two different
+        # records — this one says the analysis run and the drawing set were marked failed,
+        # that one says the project was — and both carry the same traceback.
+        #
+        # The message interpolates nothing, for the reason stated at the same boundary in
+        # `app/main.py`.
+        #
+        # Wave 3J Phase B — the two persisted values are now the SteelSpec-owned
+        # classification rather than `str(e)[:500]`. Both rows get the SAME value, and
+        # they get it from one call, so the two columns cannot disagree about a failure
+        # they both describe. The status, the write order, the re-raise and the fact that
+        # exactly these two columns move are all unchanged.
+        logger.exception("SteelSpec PDF drawing-set analysis failed")
+        classification = safe_failure_message(e)
+        repo.update_analysis_run(analysis_run_id, status="failed", error_message=classification)
+        repo.update_drawing_set(drawing_set_id, status="failed", error_message=classification)
         raise
 
     # Milestone J15: `total_pages` states the size of the drawing set that was
@@ -228,6 +304,13 @@ def parse_pdf_and_save(filepath: str, project_id: str, user_id: str, storage_pat
         pages_processed=result["pages_processed"], completed_at="now()",
         **page_totals,
     )
+    # Milestone J61 — the document's own page count, the same fact the drawing row is given
+    # at the same seam (`update_drawing_meta` inside `_run_pipeline`). It is written HERE,
+    # from the run's own reported total, rather than by threading a second identity through
+    # the pipeline: one fact, one value, recorded once on each row that carries it. A run
+    # that established no count passes `None`, which is the absence it is.
+    if document_id is not None:
+        repo.update_document_page_count(document_id, result["total_pages"])
     repo.update_drawing_set(
         drawing_set_id, status="analyzed",
         pages_analysed=result["analysed_pages"],
@@ -311,6 +394,106 @@ def _record_page_captures(pages, *, analysis_run_id: str, project_id: str,
             model=PDF_VISION_MODEL,
         )
     )
+
+
+# ======================================================================================
+# MILESTONE J36 — THE PDF'S OWN ANNOTATION READING, BESIDE THE AI'S
+# ======================================================================================
+# J28 reads the annotation occurrences a PDF contains by parsing the file's own content
+# stream: text-showing operators, their matrices and the stroked vector geometry. It
+# shares no input with the AI extraction — the same bytes are read a second way, and
+# deterministically — and its result is filed against the SAME extraction invocation the
+# page captures above already name. Nothing any run does next reads it back.
+#
+# POSITION, and this is the whole of the milestone's design. It is written where the
+# identity, the source file and the pages a run actually read are all in hand, and BEFORE
+# that run's own closing boundary:
+#
+#     _record_page_captures(...)
+#     _record_annotation_evidence(...)      <- here, in all four paths
+#     insert_members(...) / _persist_connections(...) / ...
+#     update_project_summary(...)           <- the boundary
+#
+# After `update_project_summary` a page is not read again: `retry_pdf_page` refuses a page
+# the record no longer names as failed, and `plan_continuation` derives the next window
+# from the coverage line that write carries. An annotation reading taken after it could
+# therefore never be taken at all. Taken before it, a failure leaves the region
+# re-readable and the reading is simply taken again — the same fails-safe property
+# `_record_page_captures` above is placed for.
+#
+# FAILURE IS NON-FATAL, and deliberately invisible to the persistence layer: this is a
+# second, independent reading of the drawing, so its absence changes no member, no
+# connection, no review item, no capture, no parse_failed, no coverage record, no project
+# status and no retryability. It is NOT written into `projects.warnings` — that column is
+# the J16/J17 boundary record, read back by `coverage_from_warnings` and
+# `parse_failures_from_warnings` — and not into either `error_message`, which state
+# engineering facts about a run that this milestone must not overwrite.
+
+_ANNOTATION_STORE_ABSENT_CODE = "PGRST205"
+
+
+def _annotation_store_is_absent(error: BaseException) -> bool:
+    """Whether the store's own refusal says the occurrence table is not present at all.
+
+    The same condition the J29 read surface treats as an absent store, restated here
+    rather than imported from it: the client's own code when it carries one, and its own
+    wording when it does not.
+
+    Deliberately narrow, and everything it does not match is re-raised, because each of
+    those failures means something this milestone must not hide. A foreign-key refusal
+    (23503) means the run the occurrence is attributed to does not exist; a duplicate key
+    (23505) means one attempt wrote one occurrence twice, which is a defect in the caller;
+    the append-only trigger (P0001) means something tried to rewrite a recorded reading; a
+    permission refusal (42501) means the writer's grant is wrong; and a network fault means
+    the database is unreachable. An unreachable database is not an absent table, and is
+    never reported as one.
+    """
+    if getattr(error, "code", None) == _ANNOTATION_STORE_ABSENT_CODE:
+        return True
+    described = str(error)
+    return _ANNOTATION_STORE_ABSENT_CODE in described or "schema cache" in described.lower()
+
+
+def _record_annotation_evidence(filepath, pages, *, project_id: str, drawing_id: str,
+                                analysis_run_id: str) -> int:
+    """The PDF's own annotation reading of the pages one run read. Returns how many rows.
+
+    The return value is reported for tests and ignored by every caller, deliberately: a
+    J28 reading changes nothing the run does next, and a caller that branched on it would
+    be giving this layer a say it must never have.
+
+    `pages` is the run's OWN reading — the whole document for `_run_pipeline`, the
+    invocation's window for `continue_pdf_extraction`, the single retried page for
+    `retry_pdf_page` — so exactly the pages this invocation read are asked for, and no row
+    is ever recorded for a page it did not read. `extractor_version` is the extractor's own
+    constant and `analysis_run_id` is the run already in scope; neither is defaulted and
+    neither is re-derived.
+
+    The extractor opens `filepath` itself and hashes the bytes it reads, so the recorded
+    `source_pdf_sha256` is over exactly the document this run read. The file is neither
+    re-downloaded nor re-derived here, and no second hashing rule is introduced.
+
+    A refusal from either J28 layer, or a store that is not present at all, is swallowed:
+    the run continues exactly as it would have without this call. Everything else —
+    including any unexpected Python exception — propagates, because a J28 step that ate an
+    unknown failure would be a second, invisible failure mode beside the one being
+    recorded.
+    """
+    try:
+        evidence = extract_annotations(filepath, pages=[p.page_number for p in pages])
+        rows = occurrence_rows(
+            evidence,
+            drawing_id=drawing_id,
+            project_id=project_id,
+            analysis_run_id=analysis_run_id,
+        )
+        return repo.insert_pdf_annotation_occurrences(rows)
+    except (AnnotationExtractionRefused, AnnotationEvidenceRefused):
+        return 0
+    except Exception as error:
+        if _annotation_store_is_absent(error):
+            return 0
+        raise
 
 
 def _member_rows(validated_members, *, project_id: str, drawing_id: str, reference_identity) -> list[dict]:
@@ -411,13 +594,13 @@ def _persist_connections(connections_raw, *, project_id: str, drawing_id: str,
     # has one entry per mark across the whole project.
     mark_to_id = {row["mark"]: row["id"] for row in member_rows if row.get("mark")}
 
-    valid_connection_types = {"bolted", "welded", "bolted_and_welded", "unspecified"}
+    valid_connection_types = connection_type_accounting.RECOGNISED_CONNECTION_TYPES
     connections_extracted = 0
     connections_review_required = 0
     connection_review_statuses = []
 
     for c in connections_raw:
-        conn_type = (c.get("connection_type") or "unspecified").lower().replace(" ", "_")
+        conn_type = connection_type_accounting.normalise_source_token(c.get("connection_type"))
         if conn_type not in valid_connection_types:
             bolts, welds = c.get("bolts") or [], c.get("welds") or []
             conn_type = "bolted_and_welded" if (bolts and welds) else ("bolted" if bolts else "welded" if welds else "unspecified")
@@ -440,7 +623,7 @@ def _persist_connections(connections_raw, *, project_id: str, drawing_id: str,
             + [f'{w.get("size_mm", "?")}mm {w.get("type", "")} weld' for w in welds]
         )
 
-        conn_row = repo.insert_connection({
+        conn_row = {
             "project_id": project_id,
             "connection_type": conn_type,
             "grid_reference": c.get("grid_reference"),
@@ -453,7 +636,24 @@ def _persist_connections(connections_raw, *, project_id: str, drawing_id: str,
             "extraction_method": "vision_claude",
             "review_status": review,
             "notes": "Extracted from PDF drawing via vision analysis",
-        })
+        }
+        # A connection type the drawing STATED that is outside the enum was
+        # replaced by the fallback above. The drawn token's own home is the
+        # page capture; this records ON THE ROW that a replacement happened, so
+        # a later reader cannot mistake it for a drawing that stated nothing
+        # (Milestone J37C-8V, following the J11 accounting precedent). Written
+        # only when there is something to account for, so a row from a
+        # recognised type persists exactly the columns it always did.
+        accounting = connection_type_accounting.warning_for_unrecognised(
+            c.get("connection_type"), conn_type,
+        )
+        if accounting:
+            warnings = list(conn_row.get("warnings") or [])
+            if accounting not in warnings:
+                warnings.append(accounting)
+            conn_row["warnings"] = warnings
+
+        conn_row = repo.insert_connection(conn_row)
         connection_id = conn_row["id"]
         connections_extracted += 1
         connection_review_statuses.append(review_status_of(conn_row))
@@ -556,6 +756,17 @@ def _run_pipeline(filepath: str, project_id: str, user_id: str, drawing_set_id: 
         project_id=project_id,
         drawing_set_id=drawing_set_id,
         drawing_id=drawing_id,
+    )
+
+    # Milestone J36 — the same pages, read a second way: the PDF's own annotation
+    # occurrences (J28). Every page this whole-document run read was read, so the scope is
+    # all of `pages`. Nothing below depends on the result.
+    _record_annotation_evidence(
+        filepath,
+        pages,
+        project_id=project_id,
+        drawing_id=drawing_id,
+        analysis_run_id=analysis_run_id,
     )
 
     # One row shape, one function: Milestone J16's continuation persists a
@@ -775,10 +986,221 @@ def _accumulated_warnings(
     return accumulated
 
 
+def _source_lineage(
+    project_id: str,
+    project: dict,
+    storage_path: str,
+    *,
+    document_id: str | None,
+    refuse,
+):
+    """The one drawing set and one drawing a continuation or retry adds to.
+
+    Milestone J63. Before it, this choice was decided by the same four checks in both
+    callers: exactly one drawing set, exactly one drawing, and a source path agreeing with
+    the project's own column and with the drawing's. Those checks are guards, and they do
+    not all protect the same thing. Classified by what they protect:
+
+        A. same-document continuation   the coverage record, the drawing set's counters,
+                                       the drawing's page count and — in the executor,
+                                       where the file is in hand — the file's own page
+                                       count. None of them is this function.
+        B. retry of the same document   the same, plus `RETRY_EVIDENCE_ALREADY_PERSISTED`
+                                       and the page the failures record names as failed.
+                                       Not this function either.
+        C. accidental second document   the COUNT checks below. Two lineages for one
+                                       project mean two documents' worth of record, and
+                                       adding a window to the wrong one is the error this
+                                       guard exists to prevent.
+        D. cross-project source mismatch the PATH agreement below: the bytes about to be
+                                       read must be the bytes the addressed source and the
+                                       lineage both name.
+
+    C and D are what this function IS, and J63 changes exactly two things about them. Both
+    changes are confined to a request that ADDRESSED a document; an omitted `document_id`
+    takes the pre-J63 branch below, whose checks are the pre-J63 ones written as they were
+    written, so no project that could be continued before this milestone is refused or
+    re-routed by it.
+
+        C  is narrowed, not relaxed: when a document is addressed, the count checks apply
+           to the lineages that read THAT document, and a document read by two lineages is
+           still refused rather than chosen between. The code it refuses with is J16's own
+           `CONTINUATION_DRAWING_SET_UNRESOLVED`, whose published meaning is already this
+           ("which document a continuation would be adding to is ambiguous").
+        D  is re-sourced, not dropped: the agreement is against the ADDRESSED DOCUMENT's
+           own `storage_path`, which is the whole point of the milestone — a document that
+           is not the project's newest upload is now a legitimate source, so
+           `projects.uploaded_file_path` can no longer be the thing the path is checked
+           against. The drawing's half of the check is unchanged, and it is what keeps a
+           document whose lineage read a DIFFERENT file from being continued.
+
+    `refuse` is the caller's own exception — `ContinuationRefused` or `RetryRefused` — so
+    that each caller keeps its own vocabulary while there is still exactly one statement
+    in this codebase of which guard protects what. The repository is this module's own
+    `repo`, passed in rather than imported again by the resolver, so that the store a test
+    replaces for the reads below is the same store the source was resolved from.
+    """
+    try:
+        source = resolve_extraction_source(
+            project_id, document_id=document_id, project=project, repository=repo,
+        )
+    except ContinuationRefused as refused:
+        # J16's refusal, in the caller's own exception type. The code and the detail are
+        # carried through unchanged: they name the persisted fact that was wrong, and the
+        # caller's vocabulary has no second name for it.
+        raise refuse(refused.code, refused.detail) from None
+
+    if storage_path != source.storage_path:
+        raise refuse(
+            CONTINUATION_SOURCE_MISMATCH,
+            f"this run is pointed at {storage_path!r}, but the source document it was "
+            f"resolved from states {source.storage_path!r}",
+        )
+
+    drawing_sets = repo.drawing_sets_for_project(project_id)
+
+    if not source.addressed:
+        # ==========================================================================
+        # THE PRE-J63 PATH. Every check below is the check this function replaced,
+        # written as it was written: a project whose source is the project-level column
+        # is decided by exactly the rules it was decided by before J63.
+        # ==========================================================================
+        if len(drawing_sets) != 1:
+            # Two drawing sets for one project means the extraction has been run
+            # against it twice: POST /extract has no idempotency guard, and each run
+            # creates its own drawing set, drawing and analysis run and re-inserts
+            # every member and connection row. Choosing one to add to here would be
+            # choosing which of two documents a continuation belongs to, so it is
+            # refused.
+            raise refuse(
+                CONTINUATION_DRAWING_SET_UNRESOLVED,
+                f"this project has {len(drawing_sets)} drawing set(s); this request must add to "
+                f"exactly one, so which document these pages belong to is ambiguous",
+            )
+        drawing_set = drawing_sets[0]
+
+        drawings = repo.drawings_for_drawing_set(drawing_set["id"])
+        if len(drawings) != 1:
+            raise refuse(
+                CONTINUATION_DRAWING_SET_UNRESOLVED,
+                f"drawing set {drawing_set.get('id')!r} has {len(drawings)} drawing(s); this "
+                f"request must add to exactly one",
+            )
+        drawing = drawings[0]
+
+        # The pages about to be read must be pages of the SAME document. There is no
+        # content hash anywhere in this codebase to prove sameness with, so identity
+        # is the agreement of every source reference production keeps: the path the
+        # project was uploaded at, the path its drawing was read from, and (below,
+        # in the executor, where the file is in hand) the document's own page count.
+        # Two different documents that agree on all three are indistinguishable
+        # here — see the limitations in the J16 report.
+        #
+        # The first half is re-stated rather than dropped: for this branch
+        # `source.storage_path` IS `projects.uploaded_file_path`, so the comparison
+        # above already made it, and J63 leaves a guard it did not need to change.
+        if storage_path != project.get("uploaded_file_path") or storage_path != drawing.get("storage_path"):
+            raise refuse(
+                CONTINUATION_SOURCE_MISMATCH,
+                f"this continuation is pointed at {storage_path!r}, but this project's extraction read "
+                f"{project.get('uploaded_file_path')!r} (drawing row: {drawing.get('storage_path')!r})",
+            )
+        return drawing_set, drawing
+
+    # ==================================================================================
+    # THE ADDRESSED PATH. The lineages of the document the caller named — found by
+    # reading the project's own drawing sets and drawings, and taking the ones whose
+    # `document_id` is the addressed document. No ordering, no first, no newest: the
+    # addressed id is the only thing selected on, and it selects by equality.
+    # ==================================================================================
+    lineages = [
+        (drawing_set, drawing)
+        for drawing_set in drawing_sets
+        for drawing in repo.drawings_for_drawing_set(drawing_set["id"])
+        if drawing.get("document_id") == source.document_id
+    ]
+    if len(lineages) != 1:
+        raise refuse(
+            CONTINUATION_DRAWING_SET_UNRESOLVED,
+            f"source document {source.document_id!r} is read by {len(lineages)} drawing "
+            f"lineage(s); this request must add to exactly one, so which record these pages "
+            f"belong to is not resolvable from this document alone",
+        )
+    drawing_set, drawing = lineages[0]
+
+    # Guard D, against the lineage that read the addressed document. A document whose
+    # lineage read a different file is refused: the bytes about to be read would be added
+    # to a record made from other bytes, which is the one thing a page window must not do.
+    if storage_path != drawing.get("storage_path"):
+        raise refuse(
+            CONTINUATION_SOURCE_MISMATCH,
+            f"this run is pointed at {storage_path!r}, but the lineage of source document "
+            f"{source.document_id!r} read {drawing.get('storage_path')!r}",
+        )
+    return drawing_set, drawing
+
+
+def plan_first_window(project_id: str, source: SourceDocument) -> SourceDocument:
+    """Decides which document the FIRST window of a new reading reads.
+
+    Milestone J63A. `/extract` is the one extraction route that starts something new: it
+    creates the drawing set, the drawing and the analysis run that the pages it reads
+    belong to. Every other route adds to a reading that already exists and decides which
+    one by `_source_lineage`'s guards. This is that question asked of a reading that does
+    not exist yet — WHICH of the project's documents is this reading of? — and it is
+    answered here, before anything is downloaded, queued or written.
+
+    The source is passed in rather than resolved again: an addressed request has already
+    chosen, and the only case this function exists for is the one that chose nothing.
+    It has exactly three answers.
+
+        ADDRESSED           returned unchanged. The caller named the document, and a
+                            choice that was made is not ambiguous. Nothing is read.
+        OMITTED, 0 or 1     the pre-J63 request, unchanged. A project holding no document
+        document            yet is the upload flow J61's rule deliberately allows — the
+                            file being extracted is not a `project_documents` row until a
+                            run reads it — and one document is not a choice.
+        OMITTED, 2 or more  refused, with `CONTINUATION_DRAWING_SET_UNRESOLVED`: J16's own
+        documents           code, already published, whose published meaning is already
+                            exactly this state ("which document these pages belong to is
+                            ambiguous"). The continuation and retry routes already answer
+                            this state with that code at 409, so a caller reads ONE
+                            vocabulary for one state, and J63A added no code at all.
+
+    `projects.uploaded_file_path` is not consulted on the refused branch. On a project
+    that holds more than one document the project-level column is not a source, it is a
+    CHOICE among sources, and this function refuses to make it: no document is preferred
+    by name, by size, by page count, by role, by `created_at`, by being first, by being
+    newest, or by agreeing with the project's column. The documents are COUNTED, and a
+    count is not a choice.
+
+    The count is of DOCUMENTS and not of drawing lineages. A project whose one document
+    was read twice holds two lineages and one source, and a new reading of it reads that
+    source; the lineage ambiguity is guard C of `_source_lineage`, which belongs to the
+    operations that ADD to a lineage and is unchanged by this milestone.
+
+    Exactly one read — the project's own documents, through this module's own store, the
+    same store every other persisted fact here is read from — and no write of any kind.
+    """
+    if source.addressed:
+        return source
+
+    documents = repo.project_documents_for_project(project_id)
+    if len(documents) > 1:
+        raise ContinuationRefused(
+            CONTINUATION_DRAWING_SET_UNRESOLVED,
+            f"this project holds {len(documents)} source documents and this request names "
+            f"none of them; which document a new reading of this project would read is "
+            f"ambiguous, and this route does not choose one",
+        )
+    return source
+
+
 def plan_continuation(
     project_id: str,
     storage_path: str,
     *,
+    document_id: str | None = None,
     requested_first_page: int | None = None,
     requested_last_page: int | None = None,
     requested_total_pages: int | None = None,
@@ -790,6 +1212,13 @@ def plan_continuation(
     drawing set, a different source file, no coverage record, a record that
     disagrees with itself or with its counters, or a window that is not the
     next one.
+
+    `document_id` (Milestone J63) is OPTIONAL and names which of the project's
+    source documents these pages belong to. Omitted, the source is the
+    project-level column and every check below is the check this function has
+    always applied. Named, the lineage that read that document is the one this
+    plan is about, and the source agreement is against THAT document's own
+    path — see `_source_lineage` for which guard protects what.
     """
     project = repo.get_project(project_id)
     if project is None:
@@ -798,43 +1227,10 @@ def plan_continuation(
             f"there is no project {project_id!r} to continue",
         )
 
-    drawing_sets = repo.drawing_sets_for_project(project_id)
-    if len(drawing_sets) != 1:
-        # Two drawing sets for one project means the extraction has been run
-        # against it twice: POST /extract has no idempotency guard, and each run
-        # creates its own drawing set, drawing and analysis run and re-inserts
-        # every member and connection row. Choosing one to add to here would be
-        # choosing which of two documents a continuation belongs to, so it is
-        # refused.
-        raise ContinuationRefused(
-            CONTINUATION_DRAWING_SET_UNRESOLVED,
-            f"this project has {len(drawing_sets)} drawing set(s); a continuation must add to "
-            f"exactly one, so which document these pages belong to is ambiguous",
-        )
-    drawing_set = drawing_sets[0]
-
-    drawings = repo.drawings_for_drawing_set(drawing_set["id"])
-    if len(drawings) != 1:
-        raise ContinuationRefused(
-            CONTINUATION_DRAWING_SET_UNRESOLVED,
-            f"drawing set {drawing_set.get('id')!r} has {len(drawings)} drawing(s); a "
-            f"continuation must add to exactly one",
-        )
-    drawing = drawings[0]
-
-    # The pages about to be read must be pages of the SAME document. There is no
-    # content hash anywhere in this codebase to prove sameness with, so identity
-    # is the agreement of every source reference production keeps: the path the
-    # project was uploaded at, the path its drawing was read from, and (below,
-    # in the executor, where the file is in hand) the document's own page count.
-    # Two different documents that agree on all three are indistinguishable
-    # here — see the limitations in the J16 report.
-    if storage_path != project.get("uploaded_file_path") or storage_path != drawing.get("storage_path"):
-        raise ContinuationRefused(
-            CONTINUATION_SOURCE_MISMATCH,
-            f"this continuation is pointed at {storage_path!r}, but this project's extraction read "
-            f"{project.get('uploaded_file_path')!r} (drawing row: {drawing.get('storage_path')!r})",
-        )
+    drawing_set, drawing = _source_lineage(
+        project_id, project, storage_path,
+        document_id=document_id, refuse=ContinuationRefused,
+    )
 
     previous = coverage_from_warnings(project.get("warnings"))
     if previous is None:
@@ -914,6 +1310,7 @@ def plan_continuation(
 def continue_pdf_extraction(
     filepath: str, project_id: str, user_id: str, storage_path: str,
     *,
+    document_id: str | None = None,
     requested_first_page: int | None = None,
     requested_last_page: int | None = None,
     requested_total_pages: int | None = None,
@@ -934,6 +1331,7 @@ def continue_pdf_extraction(
     plan = plan_continuation(
         project_id,
         storage_path,
+        document_id=document_id,
         requested_first_page=requested_first_page,
         requested_last_page=requested_last_page,
         requested_total_pages=requested_total_pages,
@@ -1023,6 +1421,18 @@ def continue_pdf_extraction(
         project_id=project_id,
         drawing_set_id=drawing_set_id,
         drawing_id=drawing_id,
+    )
+
+    # Milestone J36 — this WINDOW's pages, read a second way (J28). `pages` is the
+    # window's own reading and no other page is asked for, so a page this invocation did
+    # not read records nothing. Written before the commit below, because after it the
+    # window is answered and is never re-read.
+    _record_annotation_evidence(
+        filepath,
+        pages,
+        project_id=project_id,
+        drawing_id=drawing_id,
+        analysis_run_id=analysis_run_id,
     )
 
     inserted_members = repo.insert_members(window_rows)
@@ -1216,7 +1626,9 @@ class RetryPlan:
     persisted_connections: tuple[dict, ...]
 
 
-def plan_retry(project_id: str, storage_path: str, *, page_number) -> RetryPlan:
+def plan_retry(
+    project_id: str, storage_path: str, *, page_number, document_id: str | None = None,
+) -> RetryPlan:
     """Decides whether one page of this project may be read again.
 
     Reads persisted state only — no download, no rendering, no AI, no page image
@@ -1226,6 +1638,13 @@ def plan_retry(project_id: str, storage_path: str, *, page_number) -> RetryPlan:
     cannot read, a record that disagrees with itself or with its counters, a page
     number that is not one 1-based page, a page past the document, a page the
     record does not name as failed, or a page that already has evidence.
+
+    `document_id` (Milestone J63) is OPTIONAL and names which of the project's
+    source documents the page belongs to, on exactly the terms
+    `plan_continuation` accepts it: omitted is the project-level source and the
+    checks this function has always applied, and named resolves the lineage
+    that read that document. A retry is guard B of `_source_lineage` — the
+    record it re-reads is the record of ONE document.
     """
     project = repo.get_project(project_id)
     if project is None:
@@ -1234,32 +1653,10 @@ def plan_retry(project_id: str, storage_path: str, *, page_number) -> RetryPlan:
             f"there is no project {project_id!r} whose page could be read again",
         )
 
-    drawing_sets = repo.drawing_sets_for_project(project_id)
-    if len(drawing_sets) != 1:
-        raise RetryRefused(
-            CONTINUATION_DRAWING_SET_UNRESOLVED,
-            f"this project has {len(drawing_sets)} drawing set(s); a retry must read a page of "
-            f"exactly one, so which document the page belongs to is ambiguous",
-        )
-    drawing_set = drawing_sets[0]
-
-    drawings = repo.drawings_for_drawing_set(drawing_set["id"])
-    if len(drawings) != 1:
-        raise RetryRefused(
-            CONTINUATION_DRAWING_SET_UNRESOLVED,
-            f"drawing set {drawing_set.get('id')!r} has {len(drawings)} drawing(s); a retry "
-            f"must read a page of exactly one",
-        )
-    drawing = drawings[0]
-
-    # The page must be a page of the document whose record names it as failed:
-    # the same source identity the window contract requires, for the same reason.
-    if storage_path != project.get("uploaded_file_path") or storage_path != drawing.get("storage_path"):
-        raise RetryRefused(
-            CONTINUATION_SOURCE_MISMATCH,
-            f"this retry is pointed at {storage_path!r}, but this project's extraction read "
-            f"{project.get('uploaded_file_path')!r} (drawing row: {drawing.get('storage_path')!r})",
-        )
+    drawing_set, drawing = _source_lineage(
+        project_id, project, storage_path,
+        document_id=document_id, refuse=RetryRefused,
+    )
 
     coverage = coverage_from_warnings(project.get("warnings"))
     if coverage is None:
@@ -1338,7 +1735,8 @@ def plan_retry(project_id: str, storage_path: str, *, page_number) -> RetryPlan:
 
 
 def retry_pdf_page(
-    filepath: str, project_id: str, user_id: str, storage_path: str, *, page_number
+    filepath: str, project_id: str, user_id: str, storage_path: str, *,
+    page_number, document_id: str | None = None,
 ) -> dict:
     """Reads ONE page of a drawing set again, the one the record names as failed.
 
@@ -1356,7 +1754,9 @@ def retry_pdf_page(
     itself raises when the page could not be rendered or the model could not be
     reached; neither writes anything.
     """
-    plan = plan_retry(project_id, storage_path, page_number=page_number)
+    plan = plan_retry(
+        project_id, storage_path, page_number=page_number, document_id=document_id,
+    )
     page = plan.page_number
     drawing_set_id = plan.drawing_set["id"]
     drawing_id = plan.drawing["id"]
@@ -1405,6 +1805,20 @@ def retry_pdf_page(
             project_id=project_id,
             drawing_set_id=drawing_set_id,
             drawing_id=drawing_id,
+        )
+
+        # Milestone J36 — this page read a second way (J28), under this attempt's own run.
+        # This branch returns before any engineering persistence, so without its own call
+        # here a parse-failed page would never have its annotation reading recorded — and
+        # a parse-failed page is exactly the one whose escape hatch is a human. The
+        # reading is of the FILE, which was read successfully either way: the AI's
+        # response failed to parse, the bytes did not.
+        _record_annotation_evidence(
+            filepath,
+            pages,
+            project_id=project_id,
+            drawing_id=drawing_id,
+            analysis_run_id=run["id"],
         )
 
         repo.update_analysis_run(
@@ -1476,6 +1890,18 @@ def retry_pdf_page(
         project_id=project_id,
         drawing_set_id=drawing_set_id,
         drawing_id=drawing_id,
+    )
+
+    # Milestone J36 — the retried page, read a second way (J28), under this attempt's run.
+    # One page is the whole scope: the retry read one page and no other page of this
+    # document was touched by it. Written before the record stops naming the page as
+    # failed, because that write is what makes the page permanently unreadable again.
+    _record_annotation_evidence(
+        filepath,
+        pages,
+        project_id=project_id,
+        drawing_id=drawing_id,
+        analysis_run_id=analysis_run_id,
     )
 
     inserted_members = repo.insert_members(page_rows)

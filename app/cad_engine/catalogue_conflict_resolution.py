@@ -370,6 +370,11 @@ def build_conflict_review_task(conflict: CatalogueConflict) -> ExceptionResoluti
             "decision exists and the choice between the two sources is never made "
             "automatically: without a recorded decision the conflict remains BLOCKED_REVIEW."
         ),
+        # Stated rather than defaulted (J79): this task addresses the SECTION GEOMETRY fields
+        # of `conflict.conflicting_fields`, which are the catalogue's own vocabulary and not
+        # the review package's ENGINEERING_FIELDS. No engineering field is addressed, and
+        # none is inferred from the conflicting fields, so the task states None.
+        field_name=None,
     )
 
 

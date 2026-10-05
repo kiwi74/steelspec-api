@@ -373,6 +373,23 @@ def _selby_store(*, with_recovery=False, read=None):
                   page_count=SELBY_PAGE_COUNT, table=table, pages=_selby_pages(), read=read)
 
 
+def _page_run_ids(store, drawing_id, pages):
+    """Which run READ each of `pages` — J23's own selection over the persisted rows.
+
+    The direct in-process construction must be handed the same page -> run association the
+    producer derives for itself, or the two constructions would differ in their INPUTS
+    rather than in anything the producer did: one would record each candidate's origin and
+    the other would record none. Returned aligned with `pages`, which is the shape 7Y's
+    intake takes; a page the store does not carry gets None, never another page's run.
+    """
+    by_page = {
+        row["page_number"]: str(row["analysis_run_id"])
+        for row in captures.authoritative_captures(
+            store.page_extraction_captures_for_drawing(drawing_id))
+    }
+    return [by_page.get(page["page_number"]) for page in pages]
+
+
 def _arkles_store(*, read=None):
     table = j23._CaptureTable()
     j23._record(table, _arkles_pages(), run="run-arkles",
@@ -903,17 +920,23 @@ class TestTheResultIsTheExistingContract:
         The comparison is against a construction that never touches the store: 7Y's intake
         directly over the pages, then 7AJ's own start. If the persistence layer had altered
         the reading in any way that reached the workflow, these two would differ.
+
+        The one thing the direct construction is TOLD is which run read each page (J72):
+        that association lives in the store and nowhere else, so it is handed over rather
+        than left for the two sides to disagree about. Nothing else crosses.
         """
         pages = sorted(_selby_pages(), key=lambda p: p["page_number"])
         member_rows = _member_rows_for(pages)
         marks = tuple(member_rows)
 
+        store = _selby_store()
         direct_intake = intake_page_extractions(
             pages,
             project_id=SELBY_PROJECT,
             source_drawing_id=SELBY_DRAWING,
             known_member_marks=marks,
             drawing_set_page_count=SELBY_PAGE_COUNT,
+            page_analysis_run_ids=_page_run_ids(store, SELBY_DRAWING, pages),
         )
         direct = start_project_workflow(
             direct_intake.collection,
@@ -923,7 +946,7 @@ class TestTheResultIsTheExistingContract:
             section_matcher=_StubMatcher(),
         )
 
-        result = _reconstruct(_selby_store(), SELBY_PROJECT)
+        result = _reconstruct(store, SELBY_PROJECT)
 
         assert result.workflow == direct
         assert result.workflow.collection == direct.collection
@@ -1301,12 +1324,16 @@ def _selects_in(path):
 
 
 class TestThePackageAndTheShapesItClaims:
-    def test_the_package_exposes_the_five_modules(self):
+    def test_the_package_exposes_its_six_modules(self):
+        # J46 added `project_workflow_resumption`, the sixth: the resumer that replays a
+        # project's recorded revisions onto the revision 0 this module produces. It is a
+        # module beside this one, not a change to it — the producer above is still the
+        # fifth, and still the only reconstruction seam.
         import app.production_review as package
 
         assert set(package.__all__) == {
             "authorization", "binding", "identity", "project_read",
-            "project_workflow_reconstruction",
+            "project_workflow_reconstruction", "project_workflow_resumption",
         }
         assert package.project_workflow_reconstruction is producer
 

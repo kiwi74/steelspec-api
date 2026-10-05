@@ -16,6 +16,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
+# The artifact working directory. `require_artifact_working_directory` refuses a
+# directory that does not exist and creates nothing itself, so the directory a
+# fabrication drawing is built in must already be in the image. It lives under /tmp
+# because it is scratch space only: the durable artifact is uploaded to the
+# `fabrication-drawings` bucket before the resolution is recorded, and nothing reads
+# this path again afterwards, so it must not and does not survive a deployment.
+# `connection_workspace` creates each project/connection directory beneath it.
+# The path must also be set as ARTIFACT_WORKING_DIR; there is deliberately no default.
+RUN mkdir -p /tmp/steelspec-artifacts
+
 EXPOSE 8000
 
 # Shell form (not exec/array form) is required here so that $PORT

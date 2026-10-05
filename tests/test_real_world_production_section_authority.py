@@ -732,6 +732,11 @@ class TestTheRealProductionPathWasExercised:
         # of what the model returned can never depend on the engineering write
         # having succeeded first. The call is present only because this harness
         # supplies an analysis_run_id — a capture is attributed to a run.
+        # J36's annotation call is deliberately NOT here, and its absence is the
+        # point: this harness drives the pipeline at a source of "unused.pdf",
+        # which is not a readable document, so J28 refuses and writes nothing —
+        # and the five calls below are exactly what the run makes anyway. The
+        # whole engineering path is unchanged by a J28 that cannot run at all.
         assert run.repo.calls == [
             "insert_page_extraction_captures",
             "insert_members", "insert_review_items", "update_drawing_meta", "update_project_summary",
@@ -834,6 +839,29 @@ class TestTheCatalogueStillEnrichesWhereItMay:
         ])
         assert run.summary["excluded_non_steel"] == 1
         assert "M10" not in {r["mark"] for r in run.inserted}
+
+    def test_a_graded_softwood_member_is_excluded_through_the_production_path(
+        self, run_production
+    ):
+        """J37C-8V (F2): a graded softwood callout states no keyword from the
+        list, so it used to reach the schedule as unmatched steel. It is
+        excluded now — through the genuine run, not just the predicate."""
+        run = run_production([
+            _member("3/240x45 F27", mark="RB3"),
+            _member("2/200x45 F27", mark="RB4"),
+            _member("310UB46.2", mark="B1"),
+        ])
+        assert run.summary["excluded_non_steel"] == 2
+        persisted = {r["mark"] for r in run.inserted}
+        assert "RB3" not in persisted and "RB4" not in persisted
+        assert "B1" in persisted
+
+    def test_a_steel_mark_that_looks_like_a_grade_is_still_a_member(self, run_production):
+        """The counterpart, through the same path: an F-number that is a MARK is
+        not a grade, and must still reach the schedule."""
+        run = run_production([_member("250UB37", mark="F11")])
+        assert run.summary["excluded_non_steel"] == 0
+        assert "F11" in {r["mark"] for r in run.inserted}
 
     def test_a_missing_length_is_still_not_a_fabricated_zero(self, run_production):
         run = run_production([_member("310UB46.2", mark="B1", length_mm=None)])

@@ -215,6 +215,18 @@ def _tripwires(monkeypatch):
     )
 
 
+def _no_history(drawing_id):
+    """The empty reading history — what a drawing that was never read returns.
+
+    J23's own loader returns a list of rows, and a list is what it is answered with here.
+    The point is only that a request over a project whose recorded items cite a drawing
+    issues NO live read. WHICH history the composition reads — the whole one, every attempt
+    kept, rather than the current attempt per page — is J81's own subject and is proved
+    there, against the real loader.
+    """
+    return []
+
+
 def _surface(production, monkeypatch, *, store, projects, owner, recorded=None, user_id=None):
     """The real application, the real route, and one authenticated client.
 
@@ -222,6 +234,13 @@ def _surface(production, monkeypatch, *, store, projects, owner, recorded=None, 
     `projects`; the producer's five reads by the reconstruction double; the review store by
     the recording read-only double; the section matcher by J24A's honest stand-in. Nothing
     else about the request path is substituted.
+
+    J81 added a fourth substitution and it is of the same kind: the recorded band's reading
+    history now comes from J23's `page_extraction_captures_for_drawing`, so a request over a
+    project whose recorded items cite a drawing would open a live read. `_NO_HISTORY`
+    answers that read with the empty history. The recordings above already hold no review
+    items, so nothing in this file's own expectations moves: the seam exists so the SURFACE
+    stays offline, not so any band is answered differently.
     """
     client = _ProjectsClient(projects)
     monkeypatch.setattr(production.main, "supabase", client)
@@ -232,6 +251,7 @@ def _surface(production, monkeypatch, *, store, projects, owner, recorded=None, 
     )
     store_client = recorded if recorded is not None else _ReadOnlyStore()
     monkeypatch.setattr(workflow_review, "review_store_client", lambda: store_client)
+    monkeypatch.setattr(workflow_review, "capture_history_for_drawing", _no_history)
     _tripwires(monkeypatch)
 
     tokens = auth.install(monkeypatch, production)
@@ -542,7 +562,32 @@ class TestReadOnly:
         review_paths = [path for path in paths if path.startswith("/production/review")]
         assert review_paths == [
             "/production/review/{project_id}",
+            # J29: the annotation evidence viewer. A GET that renders the occurrences J28
+            # recorded; it accepts no decision and no parameter beyond which page to show.
+            "/production/review/{project_id}/annotations",
+            # J47: the one route that DOES accept a decision, named here so the list stays
+            # exact rather than filtered into silence. Every other path in this list is
+            # still a GET or a retry, and this test's own claim is now about them: the
+            # read surface this milestone renders remains a surface that cannot resolve.
+            j20.J47_RESOLUTION_ROUTE,
+            # J64: the document-role assertion. It accepts no decision about a connection,
+            # a reading or a member — it records the role a human asserts for one of the
+            # project's own source documents, which is a fact about a document rather than
+            # about what a reading of one found. Named here so the list stays exact: the
+            # read surface this milestone renders still cannot resolve anything.
+            "/production/review/{project_id}/document-role",
+            # J50: the baseline-opening operation. It accepts NO decision — an opening
+            # request carries no fields at all — and records only the project's own
+            # reconstructed revision-0 baseline. Named here so the list stays exact: the
+            # read surface this milestone renders still cannot resolve anything.
+            "/production/review/{project_id}/open",
             "/production/review/{project_id}/pages/{page_number}/retry",
+            # E2E-001A: the review READ contract. A GET that returns the same composition
+            # the workflow route renders, as data instead of as a page, because a browser
+            # form POST cannot carry the Authorization header every production route
+            # authenticates from. It accepts no decision and no body at all — it reads and
+            # renders — so the claim this milestone makes still holds over it.
+            "/production/review/{project_id}/review",
             WORKFLOW_ROUTE,
         ], review_paths
 
@@ -809,7 +854,12 @@ class TestTheSource:
             ):
                 exported = tuple(element.value for element in node.value.elts)
         assert "render_workflow_review_page" in exported
-        assert len(exported) == 9, exported
+        # J29 added the tenth: the annotation evidence viewer's page. It is an addition
+        # beside this one, not a change to it — the renderer still states nothing and
+        # still imports nothing new, and the pin stays exact so an eleventh name has to
+        # be declared here rather than appear quietly.
+        assert "render_annotation_evidence_page" in exported
+        assert len(exported) == 10, exported
 
     def test_the_renderer_names_no_engineering_vocabulary(self):
         """The renderer escapes and prints what it is handed; the engineering statements
@@ -820,11 +870,37 @@ class TestTheSource:
             assert word not in text, word
 
     def test_the_route_module_names_no_layer_below_the_route(self):
+        """The HTTP layer composes nothing: it names no contract builder, no renderer, no
+        view model and no workflow-state type — it calls the composition and maps what the
+        composition refuses to a status."""
         code = j19._code_only(MAIN_PATH)
         for forbidden in ("build_project_review_contract", "render_project_view",
                           "app.review_ui.render", "projectworkflowstate", "review_view_model"):
             assert forbidden not in code, forbidden
-        assert "cad_engine" not in MAIN_PATH.read_text()
+
+    def test_the_only_cad_engine_names_in_the_route_module_are_refusal_types(self):
+        """J47's route has to answer 7AJ's own refusals, and a refusal is answered where
+        the status is decided, so it imports the refusal TYPES. That is the whole of what
+        it may take from below: the names end in `Error`, no module is imported, no module
+        attribute is read, and a SECOND cad_engine import — of a builder, a state, or
+        anything else — is still refused here."""
+        tree = ast.parse(MAIN_PATH.read_text())
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.startswith("app.cad_engine"):
+                    imported.add((node.module, tuple(alias.name for alias in node.names)))
+            elif isinstance(node, ast.Import):
+                assert not [a.name for a in node.names if a.name.startswith("app.cad_engine")]
+        assert imported == {
+            ("app.cad_engine.project_workflow", (
+                "ConnectionAlreadyProcessedError",
+                "CrossProjectResolutionError",
+                "StaleProjectWorkflowError",
+                "UnknownProjectPackageError",
+                "WorkflowStageFailureError",
+            )),
+        }, imported
 
     def test_the_route_authorizes_before_it_reads(self, production):
         """The refusal precedes every store read because the authorization CALL precedes the

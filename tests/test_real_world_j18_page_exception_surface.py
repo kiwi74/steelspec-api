@@ -1291,14 +1291,25 @@ class TestScope:
         write. J22 later added a fourth migration; this surface reads none of it, so the
         claim stands over the schema as it now is. J23 added a fifth, which this surface
         also reads none of: the surface is served from the coverage and failure records in
-        `projects.warnings`, and it neither reads nor writes a capture. The five names are
-        pinned exactly."""
+        `projects.warnings`, and it neither reads nor writes a capture. J28 added a sixth,
+        which this surface also reads none of: the surface is still served from those two
+        records, and a PDF annotation occurrence is neither of them. (J28A is the
+        bookkeeping step that recorded the name here.) J44 added a seventh, which this surface
+        reads none of either: a claim row is not a coverage record and not a failure record,
+        and the surface is still served entirely from `projects.warnings`. J61 added an eighth,
+        which this surface reads none of either: a source document's identity is not a coverage
+        record and not a failure record, and it moves no page count and no failure line. The
+        eight names are pinned exactly."""
         assert tuple(sorted(MIGRATIONS)) == (
             "20260924000000_j5_section_resolution_truth.sql",
             "20260924010000_j6_reference_data_identity.sql",
             "20260924020000_j8b_connection_plate_evidence_nullability.sql",
             "20260925000000_j22_connection_review_persistence.sql",
             "20260925010000_j23_page_extraction_captures.sql",
+            "20260927000000_j28_pdf_annotation_occurrences.sql",
+            "20260928000000_j44_project_review_claims.sql",
+            "20260929000000_j61_project_documents.sql",
+            "20260929010000_j66_field_evidence_citations.sql",
         )
         present = sorted(path.name for path in (REPO / "supabase" / "migrations").iterdir())
         assert present == sorted(MIGRATIONS)

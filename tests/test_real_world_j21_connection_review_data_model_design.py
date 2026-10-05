@@ -65,6 +65,8 @@ from app.cad_engine.connection_review_package import (
 )
 from app.cad_engine.connection_review_snapshot import (
     APPEND_ONLY_RULE,
+    CITATION_TABLE,
+    CITATION_TABLE_COLUMNS,
     EVIDENCE_KIND,
     EVIDENCE_TABLES,
     EXISTING_PROJECT_RULE,
@@ -467,6 +469,14 @@ CONTRACT_FIELD_SOURCE = {
     "available_actions": (None, ("requires_action",)),
     "summary": (None, ("decision", "output_status", "verification_status",
                        "requires_action", "blockers", "tasks")),
+    # J66's two fields. They are the first contract fields whose source is a THIRD table:
+    # `field_citations` is the citation rows themselves (read in the design's own order,
+    # `_PROVENANCE_FIELD_ORDER` then the rest sorted, ordinal within each field), and
+    # `field_standings` is computed from them and deliberately never stored, so it cannot
+    # become a second fact that disagrees with the citations it is derived from. An empty
+    # citation table is the honest reading: no citations, and seven UNCITED standings.
+    "field_citations": (f"{CITATION_TABLE}.field_name", None),
+    "field_standings": (None, ("field_citations",)),
 }
 
 #: The project contract's own fields (its `items` are the connection contracts above).
@@ -490,16 +500,26 @@ PROJECT_FIELD_SOURCE = {
 # =============================================================================
 class TestTheDesignIsTwoTablesAndNoMore:
     def test_the_public_api_is_pinned(self):
-        """A new public function is a design change and must be argued for here."""
+        """A new public function is a design change and must be argued for here.
+
+        J66's argument for `citation_from_row`: it is the third table's row decoder, and it
+        is the exact peer of `snapshot_item_from_row`, which this list already carries for
+        the item table. It reads one stored citation row the way the store read it and
+        NOTHING else — no lookup, no derivation, no policy — because the address it decodes
+        is only ever meaningful against the evidence tables it names, and this module may
+        not read those. Leaving it module-private would mean the store reimplemented the
+        column-by-column decode that the design's own column list defines, which is exactly
+        the drift this design exists to prevent."""
         public = tuple(
             name for name, value in vars(model).items()
             if not name.startswith("_") and inspect.isfunction(value)
             and value.__module__ == model.__name__
         )
         assert sorted(public) == [
-            "build_review_snapshot", "connection_contract_from_item", "evidence_identity",
-            "evidence_identity_matches", "latest_snapshot", "project_contract_from_snapshot",
-            "snapshot_from_rows", "snapshot_is_stale", "snapshot_item_from_row",
+            "build_review_snapshot", "citation_from_row", "connection_contract_from_item",
+            "evidence_identity", "evidence_identity_matches", "latest_snapshot",
+            "project_contract_from_snapshot", "snapshot_from_rows", "snapshot_is_stale",
+            "snapshot_item_from_row",
         ]
 
     def test_every_j20_proposed_table_is_decided(self):
@@ -592,7 +612,11 @@ class TestEveryContractFieldIsCovered:
             assert (stored is None) != (derived is None), field
 
     def test_every_stored_field_names_a_real_column(self):
-        columns = {name for name, _, _, _ in SNAPSHOT_TABLE_COLUMNS + ITEM_TABLE_COLUMNS}
+        # J66 added the citation table, so its own declared columns are a legitimate source
+        # too — declared here, from the module's own column list, never a free-form name.
+        columns = {name for name, _, _, _ in SNAPSHOT_TABLE_COLUMNS + ITEM_TABLE_COLUMNS} | {
+            name for name, _, _, _ in CITATION_TABLE_COLUMNS
+        }
         for field, (stored, _) in list(CONTRACT_FIELD_SOURCE.items()) + list(
             PROJECT_FIELD_SOURCE.items()
         ):
@@ -617,16 +641,18 @@ class TestEveryContractFieldIsCovered:
                 assert column in derivable or column in columns, (field, fact)
 
     def test_the_derived_set_is_only_presentation_and_arithmetic(self):
-        """The fields that are NOT stored are exactly the display strings and the sums —
-        the ones 7AK itself computes from the same facts."""
+        """The fields that are NOT stored are exactly the display strings, the sums — the
+        ones 7AK itself computes from the same facts — and, since J66, the field standing,
+        which is computed from the citation rows for the same reason: a stored copy could
+        disagree with the citations it is supposed to summarise."""
         derived = sorted(
             field for field, (stored, _) in CONTRACT_FIELD_SOURCE.items() if stored is None
         )
         assert derived == [
             "ai_bolt_readings", "ai_confidence", "ai_connection_type",
             "ai_malformed_readings", "ai_plate_readings", "ai_unrecognised_readings",
-            "ai_weld_readings", "available_actions", "blockers", "requires_action",
-            "summary", "warnings",
+            "ai_weld_readings", "available_actions", "blockers", "field_standings",
+            "requires_action", "summary", "warnings",
         ]
 
 
@@ -1506,7 +1532,17 @@ class TestJ19AuthorizationIsReused:
         assert _declared_routes(production.main.app) == FROZEN_ROUTES
 
     def test_the_production_review_package_does_not_import_this_model(self):
+        # J46 is the one declared exception, and it is named rather than waved through.
+        # The whole job of `project_workflow_resumption.py` is to REPLAY this model's
+        # persisted revisions, so it reads the model through J22's own codec; a second
+        # codec, or a copy of the model inside the package, is what this guard is for and
+        # is still refused here (`connection_review_snapshot.py` must not exist beside it,
+        # as the test above asserts). Every other module in the package stays bound by the
+        # original rule, so a THIRD reader still has to be declared here.
+        READERS = {"project_workflow_resumption.py"}
         for path in sorted((REPO / "app" / "production_review").glob("*.py")):
+            if path.name in READERS:
+                continue
             source = path.read_text()
             assert "connection_review_snapshot" not in source, path.name
             assert "connection_review_items" not in source, path.name
@@ -1550,6 +1586,7 @@ class TestNoDuplicateEngineeringTruth:
             "__future__", "copy", "hashlib", "json",
             "collections.abc", "dataclasses", "typing",
             "app.cad_engine.automation_gate",
+            "app.cad_engine.candidate_origin_address",
             "app.cad_engine.connection_review_package",
             "app.cad_engine.drawing_dispatch",
             "app.cad_engine.drawing_output_verification",
@@ -1596,9 +1633,18 @@ class TestNoDuplicateEngineeringTruth:
                "confidence", "material", "malformed_fields", "unrecognised_fields",
                "quantity", "size", "grade", "type", "thickness_mm", "width_mm", "depth_mm",
                "size_mm", "extra", "source_drawing_id", "drawing_number", "source_page",
-               "detail_reference", "grid_reference", "task_id", "task_type", "blocker_codes",
+               "detail_reference", "grid_reference",
+               # J72 — the candidate's own origin, inside `evidence`: the run that read the
+               # page and the candidate's index in that page's own array. Neither is an
+               # engineering measurement, which is why the gate below stays exactly as strict.
+               "analysis_run_id", "candidate_index",
+               "task_id", "task_type", "blocker_codes",
                "question", "current_ai_value", "answer_type", "allowed_choices",
                "evidence_requirement", "status", "resolution", "answer", "evidence",
+               # J79 — the ONE engineering field a task addresses, inside `tasks`. It is a
+               # member of the review package's own ENGINEERING_FIELDS vocabulary, so it is
+               # a KEY and never a measurement; the gate below is unchanged and still strict.
+               "field_name",
                "evidence_kind", "evidence_tables", "evidence_digest", TUPLE_TAG}
         )
         passthrough = {"answer", "current_ai_value", "malformed_fields",
@@ -1639,10 +1685,12 @@ class TestNoDuplicateEngineeringTruth:
 # =============================================================================
 class TestThisDesignIsUnwired:
     def test_no_production_module_imports_the_design(self):
-        """J21 wrote no migration and bound the design to nothing. The one module that
-        imports it today is J22's store, which is the implementation this design was
-        accepted to make possible — and it is still bound to no route, no UI and no
-        production module."""
+        """J21 wrote no migration and bound the design to nothing. Every module that
+        imports it today is named below, and each reads the design rather than adding a
+        table, a codec or a second write path — J22's store is the implementation this
+        design was accepted to make possible, and J47's route is the first production
+        route to reach it. This design's own milestone added no route; the list is exact
+        so that a consumer it did not foresee has to be declared rather than absorbed."""
         importers = []
         for path in sorted((REPO / "app").rglob("*.py")):
             if path.name == MODULE_PATH.name:
@@ -1650,12 +1698,36 @@ class TestThisDesignIsUnwired:
             if "connection_review_snapshot" in path.read_text():
                 importers.append(str(path.relative_to(REPO)))
         assert importers == [
+            # J80: the consumer boundary. It imports exactly one thing from this design —
+            # `ReviewSnapshotItem`, the codec `snapshot_item_from_row` returns — and one
+            # thing from the task model (`_task_from_row`), because an item's tasks are read
+            # back through the system's own decoder or not at all. It writes none of it: no
+            # table, no codec, no revision. It has no caller of its own, so this design is
+            # still not reachable from any production path.
+            "app/cad_engine/cited_candidate_resolution.py",
             "app/engineering_data/connection_review_repository.py",
             # J25: the production surface REPLAYS a recorded snapshot through 7AK's own
             # `project_contract_from_snapshot` so the recorded band and the live band share
             # one presentation chain. It reads this design; it writes none of it and adds
             # no table. The assertion stays exact, so a third consumer must be declared.
             "app/production_connection_review.py",
+            # J46: the resumer decodes persisted items back into 7AJ connection states with
+            # this codec's own `_state_from_item` rather than restating the projection, so
+            # a codec change cannot silently drift from what replay rebuilds. It reads the
+            # design and writes none of it. Declared here, as the assertion requires.
+            "app/production_review/project_workflow_resumption.py",
+            # J50: the baseline-opening operation. It reaches the design the way every
+            # writer must — through J22's repository — and imports exactly one thing from
+            # it: the gap refusal it has to recognise when two opens race. It names none
+            # of the design's tables, columns or codecs itself, and adds no table.
+            "app/production_review_opening.py",
+            # J47: the route that records a review. It reaches the design the way every
+            # writer must — through J22's repository, which owns the builder and the
+            # persist — and names none of the design's tables, columns or codecs itself.
+            # It is the module that finally BINDS the design to a production route, which
+            # is what the docstring above said had not happened; the guard is updated to
+            # name it rather than widened, so a further consumer still has to be declared.
+            "app/production_review_resolution.py",
         ], importers
 
     def test_no_migration_was_written(self):
@@ -1664,7 +1736,20 @@ class TestThisDesignIsUnwired:
         not a snapshot and not a review item, and the two tables below appear in J22's
         migration and nowhere else. The list is pinned so that a migration appearing here
         unremarked fails this file rather than passing quietly — which is what happened when
-        J22 added one, and again when J23 did."""
+        J22 added one, and again when J23 did, and again when J28 did. J28's table records PDF
+        annotation occurrences and is not a snapshot and not a review item either: the two
+        tables below are still written in J22's migration and nowhere else.
+
+        J44 added one, and it is not this design's either. It places a claim row keyed by
+        project — who is reviewing a project and until when — and neither table below is
+        written in it: a claim is not a snapshot and not a review item, and it records no
+        decision, no answer and no reading. It is named here by J44 so that the next
+        migration has to name itself too. J61 added one, and it is not this design's
+        either: it gives a source document of a project an identity and points a drawing
+        at it, and neither table below is written in it — a document identity is not a
+        snapshot and not a review item, and it records no decision, no answer and no
+        reading. It is named here by J61 so that the next migration has to name itself
+        too."""
         migrations = sorted(
             path.name for path in (REPO / "supabase" / "migrations").glob("*.sql")
         )
@@ -1674,6 +1759,10 @@ class TestThisDesignIsUnwired:
             "20260924020000_j8b_connection_plate_evidence_nullability.sql",
             "20260925000000_j22_connection_review_persistence.sql",
             "20260925010000_j23_page_extraction_captures.sql",
+            "20260927000000_j28_pdf_annotation_occurrences.sql",
+            "20260928000000_j44_project_review_claims.sql",
+            "20260929000000_j61_project_documents.sql",
+            "20260929010000_j66_field_evidence_citations.sql",
         ], migrations
         written_in = {}
         for path in sorted((REPO / "supabase").rglob("*.sql")):
@@ -1681,9 +1770,28 @@ class TestThisDesignIsUnwired:
             for name in (SNAPSHOT_TABLE, ITEM_TABLE):
                 if name in text:
                     written_in.setdefault(name, []).append(path.name)
+        # J65 RATIFIED THE WIDENING, AND ONLY THE WIDENING. The fence was one file when it
+        # was written, because J22's migration was the only migration that implemented this
+        # design. J66's migration hangs one more table from the ITEM through a composite
+        # foreign key, so it has to name the item table; it also names the snapshot table
+        # once, in the header's listing of the chain the new table belongs to. The assertion
+        # stays an EXACT SET rather than a lower bound: a third file naming either table has
+        # to be declared here rather than absorbed. The two files below are named by two
+        # different rights, and the difference is stated so it cannot be over-read — the
+        # item's second mention is STRUCTURAL (a foreign key the database enforces), while
+        # the snapshot's is the chain listing and nothing else: J66 writes no row of it,
+        # alters nothing in it, and adds no second snapshot writer or second item writer.
+        # Nothing here is relaxed; the permission is for these two migrations to name these
+        # two tables, not a licence to name them anywhere.
         assert written_in == {
-            SNAPSHOT_TABLE: ["20260925000000_j22_connection_review_persistence.sql"],
-            ITEM_TABLE: ["20260925000000_j22_connection_review_persistence.sql"],
+            SNAPSHOT_TABLE: [
+                "20260925000000_j22_connection_review_persistence.sql",
+                "20260929010000_j66_field_evidence_citations.sql",
+            ],
+            ITEM_TABLE: [
+                "20260925000000_j22_connection_review_persistence.sql",
+                "20260929010000_j66_field_evidence_citations.sql",
+            ],
         }, written_in
 
     def test_the_design_reads_no_environment_no_secret_and_no_file(self, monkeypatch):

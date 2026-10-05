@@ -111,14 +111,27 @@ MODULE_PATH = REPO / "app" / "validation" / "project_status.py"
 # arrived with J22 and touches neither `projects.status` nor anything J13 derives; the fifth
 # arrived with J23 and is not this milestone's either — a raw AI reading is explicitly NOT
 # evidence, so it is not a table `projects.status` is derived from and the derivation is
-# untouched by it. The list is pinned so that a migration appearing here unremarked fails
-# this file rather than passing quietly — which is exactly what happened when J22 added one.
+# untouched by it. The sixth arrived with J28 and is not this milestone's either: a PDF
+# annotation occurrence is a reading of the drawing, and `projects.status` is derived from
+# what was persisted as engineering evidence, which this table is not and is read by nothing.
+# The eighth arrived with J61, and it is not this milestone's either: it creates one row per
+# SOURCE DOCUMENT a project has and adds one nullable pointer from `drawings` to it. Nothing
+# in it reads or writes `projects.status`, its derivation, or any input to it.
+# The list is pinned so that a migration appearing here unremarked fails this file rather than
+# passing quietly — which is exactly what happened when J22 added one, again when J23 did, and
+# again when J28 did, and again when J44 did, and again when J61 did, and again when J66 did.
+# J28A is the bookkeeping step that recorded the J28 name here; J44, J61 and J66 each recorded
+# their own.
 MIGRATIONS = (
     "20260924000000_j5_section_resolution_truth.sql",
     "20260924010000_j6_reference_data_identity.sql",
     "20260924020000_j8b_connection_plate_evidence_nullability.sql",
     "20260925000000_j22_connection_review_persistence.sql",
     "20260925010000_j23_page_extraction_captures.sql",
+    "20260927000000_j28_pdf_annotation_occurrences.sql",
+    "20260928000000_j44_project_review_claims.sql",
+    "20260929000000_j61_project_documents.sql",
+    "20260929010000_j66_field_evidence_citations.sql",
 )
 
 
@@ -228,6 +241,11 @@ class _RecordingRepository:
         self.inserted_members = []
         self.inserted_connections = []
         self.captures = []
+        # Milestone J61: the source documents recorded, and the document each drawing write
+        # named. Neither is an input to the status this file is about.
+        self.documents = []
+        self.documents_by_content = {}
+        self.document_links = []
 
     def _record(self, name):
         self.calls.append(name)
@@ -236,9 +254,45 @@ class _RecordingRepository:
         self._record("create_drawing_set")
         return {"id": "drawing-set-1"}
 
-    def create_drawing(self, drawing_set_id, file_name, storage_path):
+    def create_drawing(self, drawing_set_id, file_name, storage_path, document_id=None):
+        # Milestone J61: the drawing is created pointing at the source document the run read.
+        # The argument is accepted and recorded because the production call carries it.
         self._record("create_drawing")
-        return {"id": "drawing-1"}
+        self.document_links.append(document_id)
+        return {"id": "drawing-1", "document_id": document_id}
+
+    def create_project_document(self, project_id, *, storage_path, file_name,
+                                source_format=None, byte_size=None, page_count=None,
+                                content_sha256=None, role="UNKNOWN", revision_label=None,
+                                supersedes_document_id=None):
+        # Milestone J61. This file is about the status J13 derives from persisted EVIDENCE,
+        # and a source document's identity is not evidence: the row is recorded here and is
+        # read by nothing in the derivation. The contract is the production one — a proven
+        # hash is the identity, so the same bytes are the same document.
+        self._record("create_project_document")
+        existing = self.documents_by_content.get((project_id, content_sha256))
+        if content_sha256 is not None and existing is not None:
+            return dict(existing)
+        row = {
+            "id": f"document-{len(self.documents) + 1}",
+            "project_id": project_id,
+            "storage_path": storage_path,
+            "file_name": file_name,
+            "source_format": source_format,
+            "byte_size": byte_size,
+            "page_count": page_count,
+            "content_sha256": content_sha256,
+            "role": role,
+            "revision_label": revision_label,
+            "supersedes_document_id": supersedes_document_id,
+        }
+        self.documents.append(row)
+        if content_sha256 is not None:
+            self.documents_by_content[(project_id, content_sha256)] = row
+        return dict(row)
+
+    def update_document_page_count(self, document_id, page_count):
+        self._record("update_document_page_count")
 
     def create_analysis_run(self, drawing_set_id, model_used):
         self._record("create_analysis_run")

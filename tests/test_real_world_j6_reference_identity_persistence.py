@@ -893,6 +893,48 @@ class TestLegacyRows:
         readings. An insert appends and a read reads; neither is an update, and
         neither touches a member row, so the property this test guards is
         unchanged.
+
+        Milestone J28 added the append for the PDF annotation occurrence ledger,
+        and Milestone J29 added the read beside it. J28 did not declare its name
+        here; J29 declares both, because leaving the list stale would have made
+        this pin fail for a reason that is not the property it guards. The
+        property is still unchanged: the append writes rows to a table that
+        holds no member and no identity of any kind and that carries no update
+        path — the J28 tests assert that function's own code names no update,
+        delete or upsert — and the read is a `.select()` of that same table,
+        filtered by project. Neither can rewrite a written member row, because
+        neither reaches a member row at all.
+
+        Milestone J61 added the identity of a project's source DOCUMENT: one
+        content-idempotent append, two reads and one write of the document's own
+        page count. The append creates a `project_documents` row keyed by the
+        hash of the file's bytes, so a repeated extraction of one document is a
+        repeat rather than a second identity; it is an insert, and it reads
+        before it inserts, never after. The two reads return persisted facts
+        about a document, and about the document a lineage names. The write sets
+        `page_count` on one document — a nullable ATTRIBUTE column that the J61
+        migration declares as the lineage's own count where it has one and NULL
+        where it does not, and that the pipeline fills once the reading has
+        established it. None of the four can reach a member row: a document is a
+        fact about a FILE, and this table carries no member, no section and no
+        reference identity. The property this test guards is unchanged, and the
+        second assertion below admits `update_document_page_count` for the same
+        reason it admits the writers above — it writes a recorded attribute, not
+        an identity.
+
+        Milestone J64 added the role a human ASSERTS for one of a project's own
+        source documents: one read of the project's documents and one write of
+        one column of one `project_documents` row. It is not an update of
+        anything a reading produced — it revises no member, no section, no
+        connection and no reference identity, and it reaches no member row: it
+        sets `role` on a row that describes a FILE. The role is an assertion and
+        never an inference, the J64 tests assert that removing either of its two
+        ownership guards changes what the operation does, and the column it
+        writes already existed with its own DEFAULT and CHECK before this
+        milestone — no migration was written for it. The property this test
+        guards is unchanged, and the second assertion below admits
+        `update_document_role` for the same reason it admits the writers above:
+        it writes a recorded attribute, not an identity.
         """
         import inspect
 
@@ -920,6 +962,24 @@ class TestLegacyRows:
             # carries no update, delete or upsert, and the live table refuses
             # both at the append-only trigger and at the grant.
             "insert_page_extraction_captures", "page_extraction_captures_for_drawing",
+            # J28 append and J29 read for the PDF annotation occurrence ledger,
+            # declared together here because J28 left this list untouched. The
+            # append writes into a table with no member column and no update
+            # path, and the read is a select of that table; see the docstring.
+            "insert_pdf_annotation_occurrences", "pdf_annotation_occurrences_for_project",
+            # J61 append and reads for the document identity. The append is
+            # content-idempotent: the J61 tests assert it reads before it inserts,
+            # never after, and that a second call for the same bytes returns the
+            # row the first one wrote. See the docstring.
+            "create_project_document", "project_documents_for_project",
+            "document_for_drawing", "update_document_page_count",
+            # J64: sets `role` on one project_documents row — the value a human
+            # ASSERTED, replacing the UNKNOWN the row carried. It reads this
+            # project's own documents first (through J61's read, above) and
+            # writes one column of one of them. A document is a fact about a
+            # FILE, not an identity, and it reaches no member row; see the
+            # docstring.
+            "update_document_role",
         }
         assert not any(
             name.startswith("update") and "member" in name for name in public
@@ -928,6 +988,14 @@ class TestLegacyRows:
             name.startswith("update") and name not in (
                 "update_analysis_run", "update_drawing_set", "update_drawing_meta",
                 "update_project_summary",
+                # J61: sets `page_count` on one project_documents row. A recorded
+                # attribute of a FILE, not an identity — and it reaches no member.
+                "update_document_page_count",
+                # J64: sets `role` on one project_documents row — the role a human
+                # asserted. The same shape as the line above: a recorded
+                # attribute of a FILE, scoped by project and document, reaching
+                # no member row and no identity.
+                "update_document_role",
             )
             for name in public
         )

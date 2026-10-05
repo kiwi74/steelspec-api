@@ -64,6 +64,81 @@ def test_timber_keywords_are_excluded_not_deleted_silently():
     assert any(i.rule == "MATERIAL_CONTAMINATION_WARNING" for i in result["issues"])
 
 
+# === Rule: timber contamination — AS/NZS softwood stress grades (F-grades) ===
+def test_f_graded_timber_is_excluded_not_persisted_as_steel():
+    """A graded softwood callout states none of the keyword list, so it used to
+    read as unmatched STEEL and persist as a member. It is timber."""
+    raw = [
+        {"mark": "RB3", "section": "3/240x45 F27", "source_page": 21, "confidence": 70},
+        {"mark": "RB4", "section": "2/200x45 F27", "source_page": 21, "confidence": 70},
+        {"mark": "B1", "section": "250UB37", "source_page": 1, "length_mm": 5000, "confidence": 95},
+    ]
+    result = validate_extraction(raw, FakeMatcher())
+    assert {e["mark"] for e in result["excluded"]} == {"RB3", "RB4"}
+    member_marks = {m["mark"] for m in result["members"]}
+    assert "RB3" not in member_marks and "RB4" not in member_marks
+    assert "B1" in member_marks
+    # Surfaced as a warning, exactly as the keyword path already does.
+    contamination = [i for i in result["issues"] if i.rule == "MATERIAL_CONTAMINATION_WARNING"]
+    assert len(contamination) == 1
+    assert "RB3" in contamination[0].message and "RB4" in contamination[0].message
+
+
+def test_the_graded_timber_family_is_recognised():
+    for section in [
+        "3/240x45 F27", "2/200x45 F27", "240x45 F27", "200x45F27",
+        "190x45 F8", "140x45 F17", "190x45 F11", "90x45 F4", "240x45 F34",
+        "2/190x45 F8 KDHW",
+    ]:
+        assert is_timber_or_non_steel(section) is True, section
+
+
+def test_an_f_number_alone_is_a_member_mark_not_a_timber_grade():
+    """The reason the grade must be anchored to a section size: this project's
+    own corpus carries STEEL members marked F1, F2, F3, F6, F11 and F12, and an
+    unanchored F-number would turn every one of them into timber."""
+    for token in ["F1", "F2", "F3", "F6", "F11", "F12", "F27", "F34",
+                  "mark F11", "F11 (typ)"]:
+        assert is_timber_or_non_steel(token) is False, token
+        assert classify_member(token, None) == "unmatched_steel", token
+
+
+def test_an_unanchored_grade_stays_conservative():
+    """A section stating only the grade, with no size, is not enough to call it
+    timber — the same conservatism the keyword list has always had."""
+    assert classify_member("F27", None) == "unmatched_steel"
+    assert classify_member("Grade F27", None) == "unmatched_steel"
+
+
+def test_steel_callouts_containing_f_like_tokens_are_not_timber():
+    for section in [
+        "250UB37", "310UB46.2", "200UC46.2", "89x5 SHS", "250PFC",
+        "125x75x6 EA", "150x100x10 UA", "300FC", "220",
+        # The anchor is deliberately tight: an open middle would read a steel
+        # hollow section followed by a grade-shaped token as timber.
+        "200x200x6 SHS F17", "100x100x5 SHS F8", "150x90x6 RHS F11",
+    ]:
+        assert is_timber_or_non_steel(section) is False, section
+
+
+def test_a_catalogue_matched_section_is_never_reclassified_as_timber():
+    """The F-grade signal is an addition to the unmatched path only: a section
+    the catalogue resolved stays steel, whatever it contains."""
+    assert classify_member("240x45 F27", FakeMatcher().match("250UB37")) == "steel_confirmed"
+
+
+def test_existing_timber_keywords_still_match():
+    """The keyword list is untouched by the F-grade addition — every form it
+    recognised before it still recognises, and they still exclude."""
+    for section in [
+        "2/190x45 SG8 H3.2", "140x45 H4 SG8", "125x125 H5", "190x45 SG8 H2.0",
+        "300x90 Hyone", "200x90 spotted gum beam", "240x45 hyONE", "246x90 hy90",
+        "LVL 240x45", "HySPAN 300x63", "140x45 SG6", "190x45 SG10 H3.2",
+        "KWILA 100x50", "MERBAU", "PLYWOOD 12mm", "TREATED PINE 90x45",
+    ]:
+        assert is_timber_or_non_steel(section) is True, section
+
+
 def test_bare_dimension_without_timber_keyword_is_not_classified_as_timber():
     # "220" alone is genuinely ambiguous — must NOT be auto-classified as timber.
     assert classify_member("220", None) == "unmatched_steel"

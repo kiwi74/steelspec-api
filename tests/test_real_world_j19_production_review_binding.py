@@ -81,8 +81,11 @@ import re
 import tokenize
 import types
 from pathlib import Path
+from urllib.parse import unquote
 
+import httpx
 import pytest
+from yarl import URL
 
 from tests import production_review_auth as auth
 from tests import test_real_world_j16_pdf_continuation as j16
@@ -119,13 +122,33 @@ GATED_PROJECT_ROUTES = (
 # file rather than passing quietly, which is what happened when J22 added the fourth and again
 # when J23 added the fifth. J23's capture table holds no owner column and no second
 # authorization system: it is reached through the project's own rows, exactly as everything
-# else here is, so the relationship this milestone documents is unchanged.
+# else here is, so the relationship this milestone documents is unchanged. J28 added the sixth
+# by the same rule: its annotation-occurrence table holds no owner column either, is reached
+# through `drawings` and `projects`, and adds no way to authorize anything — so the
+# relationship this milestone documents is still unchanged. J44 added the seventh and J61 the
+# eighth by that same rule, and neither holds an owner column either.
 EXISTING_MIGRATIONS = (
     "20260924000000_j5_section_resolution_truth.sql",
     "20260924010000_j6_reference_data_identity.sql",
     "20260924020000_j8b_connection_plate_evidence_nullability.sql",
     "20260925000000_j22_connection_review_persistence.sql",
     "20260925010000_j23_page_extraction_captures.sql",
+    "20260927000000_j28_pdf_annotation_occurrences.sql",
+    # J44's, added by J44. It places one claim row keyed by project. It carries no owner, no
+    # role and no membership, so the authorization relationship this milestone is about is
+    # still exactly the one `projects.user_id` expresses.
+    "20260928000000_j44_project_review_claims.sql",
+    # J61's, added by J61 by the same rule: it gives a source document of a project an
+    # identity and points a `drawings` row at it. It carries no owner, no role and no
+    # membership, and it is reached through the project's own rows, so the authorization
+    # relationship this milestone is about is still exactly `projects.user_id`.
+    "20260929000000_j61_project_documents.sql",
+    # J66's, added by J66 by the same rule: it records WHERE one field of one reviewed
+    # connection came from. It carries no owner, no role and no membership of its own — its
+    # citation hangs from the review item through a composite foreign key, and that item is
+    # reached through the project's own rows — so the authorization relationship this
+    # milestone is about is still exactly `projects.user_id`.
+    "20260929010000_j66_field_evidence_citations.sql",
 )
 
 
@@ -175,18 +198,29 @@ def tokens(production, monkeypatch):
 
 class _Storage:
     """The one storage call the retry task makes, answered from the document's own
-    real bytes — never from the network."""
+    real bytes — never from the network.
+
+    Since J37C-8Q the task reads through `app.storage_download`, which reaches the
+    object endpoint through storage3's own bucket proxy rather than through
+    `download()`. So this stands in for the proxy and the HTTP client under it — the
+    substitution boundary is the NETWORK, not the download call — and the bytes and
+    recorded paths are exactly what they were.
+    """
 
     def __init__(self, owner):
         self.owner = owner
+        self.id = "uploads"
+        self._base_url = URL("https://storage.invalid/storage/v1/")
+        self._headers = httpx.Headers({"Authorization": "Bearer test-not-a-real-key"})
+        self._client = httpx.Client(transport=httpx.MockTransport(self._serve))
+
+    def _serve(self, request):
+        self.owner.paths.append(unquote(request.url.path.split("/object/uploads/", 1)[1]))
+        return httpx.Response(200, content=self.owner.source_bytes)
 
     def from_(self, bucket):
         assert bucket == "uploads", bucket
         return self
-
-    def download(self, path):
-        self.owner.paths.append(path)
-        return self.owner.source_bytes
 
 
 class _ProjectQuery:
@@ -265,6 +299,32 @@ def _drawings_reader(stores):
             "the projects' id spaces are not disjoint"
         )
         return owning[0].drawings_for_drawing_set(drawing_set_id)
+
+    return read
+
+
+def _document_reader(stores):
+    """`document_for_drawing`, answered by the store that OWNS the drawing.
+
+    Milestone J61. The read model resolves a drawing's document through this one
+    function, and the same discipline `_drawings_reader` states applies to it: the
+    drawing's own id decides which project's store answers, so a request can never
+    be served another project's document, and an id no project owns is a failure
+    rather than an absent document — which would look exactly like a project whose
+    drawing names no document at all.
+    """
+    owners = {}
+    for store in stores.values():
+        for row in store.drawings.values():
+            owners.setdefault(row["id"], []).append(store)
+
+    def read(drawing_id):
+        owning = owners[drawing_id]
+        assert len(owning) == 1, (
+            f"drawing {drawing_id!r} is owned by {len(owning)} projects: "
+            "the projects' id spaces are not disjoint"
+        )
+        return owning[0].document_for_drawing(drawing_id)
 
     return read
 
@@ -353,6 +413,10 @@ def _surface(production, monkeypatch, docs, tokens, *, user_id=None, source=Fals
     monkeypatch.setattr(
         production.repository, "drawings_for_drawing_set",
         _drawings_reader(stores),
+    )
+    monkeypatch.setattr(
+        production.repository, "document_for_drawing",
+        _document_reader(stores),
     )
     reports = []
     monkeypatch.setattr(
@@ -980,10 +1044,14 @@ class TestTheLoadIsReadOnly:
         assert response.status_code == 200
         # The HTTP surface reads the project row it authorizes and no other table.
         assert surface.client.tables_read == ["projects"]
-        # The read model reads the project's drawing sets and their drawings,
-        # through the repository's own existing reads and no others.
+        # The read model reads the project's drawing sets, their drawings, and — since
+        # J61 — the document each drawing names, through the repository's own existing
+        # reads and no others. The third read is not a new dependency of the read model
+        # so much as the other half of the second: a drawing now carries a `document_id`
+        # and the record states the document it stands for, which is the whole point of
+        # the milestone. It is made only for a drawing that itself names a document.
         assert sorted(doc.repository.reads) == [
-            "drawing_sets_for_project", "drawings_for_drawing_set",
+            "document_for_drawing", "drawing_sets_for_project", "drawings_for_drawing_set",
         ]
 
     def test_loading_the_page_changes_nothing(self, project, production, monkeypatch, tokens):
@@ -1403,12 +1471,15 @@ class TestIsolation:
         # merely that a read happened.
         assert a_asked == [first.project_id, first.project_id]
         assert b_asked == [second.project_id]
-        # And each page stated its own record, read through the existing reads only.
+        # And each page stated its own record, read through the existing reads only —
+        # the third being J61's document hop, which is made against the same store the
+        # drawing was read from (see `_document_reader`), so each request still answered
+        # entirely out of its own project.
         assert sorted(set(first.repository.reads)) == [
-            "drawing_sets_for_project", "drawings_for_drawing_set",
+            "document_for_drawing", "drawing_sets_for_project", "drawings_for_drawing_set",
         ]
         assert sorted(set(second.repository.reads)) == [
-            "drawing_sets_for_project", "drawings_for_drawing_set",
+            "document_for_drawing", "drawing_sets_for_project", "drawings_for_drawing_set",
         ]
 
     def test_a_third_reviewer_sees_neither_project(self, project, production, monkeypatch, tokens):
@@ -1544,7 +1615,9 @@ class TestScopeGuard:
     def test_no_migration_was_authored(self):
         """The authorization relationship already existed. No schema change was made
         for J19 — and if one ever is without this list being updated, this test says
-        so rather than passing silently."""
+        so rather than passing silently. J44's migration is on the list for exactly
+        that reason: it was added here when it was written, and the authorization
+        scan below still passes over it."""
         migrations = sorted(
             path.name for path in (REPO / "supabase" / "migrations").glob("*.sql")
         )
@@ -1633,6 +1706,9 @@ class TestThePackageContract:
             "project_read",
             # J24A: reconstruct a project's revision-0 workflow from persisted capture.
             "project_workflow_reconstruction",
+            # J46: resume that workflow from the revisions J22 persisted, without the
+            # process that produced them. Declared here, not appended quietly.
+            "project_workflow_resumption",
         }
 
     def test_the_jwks_url_is_derived_from_the_configured_project_url(self, production):

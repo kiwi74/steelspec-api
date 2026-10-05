@@ -51,6 +51,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from app.cad_engine.candidate_origin_address import CandidateOrigin, origins_for_page
 from app.cad_engine.project_connection_review import (
     SUMMARY_SCOPE_STATEMENT,
     ProjectConnectionReviewCollection,
@@ -108,6 +109,7 @@ def intake_page_extractions(
     source_drawing_id: str | None = None,
     known_member_marks: Sequence[str] | None = None,
     drawing_set_page_count: int | None = None,
+    page_analysis_run_ids: Sequence[str | None] | None = None,
 ) -> ProjectExtractionIntake:
     """
     Flattens the pages' AI connection objects exactly as app/pipeline.py does
@@ -115,14 +117,29 @@ def intake_page_extractions(
 
     `project_id`/`source_drawing_id` come from the caller (the pipeline knows them; the AI does not). The drawing
     number is taken from the page numbered 1, as the pipeline does. The pages and their entries are never mutated.
+
+    `page_analysis_run_ids` (J72) is the run that produced each page's reading, aligned ONE-TO-ONE with
+    `pages` — the reading's own run, not the run that happens to stand for the page today. It is optional,
+    and an entry may be None where the caller cannot state it. Each candidate then records the origin
+    `analysis_run_id` + `candidate_index` — the candidate's ZERO-BASED position in ITS OWN page's
+    `raw_connections` array, taken from that array while it is still in hand here. A caller that states no
+    runs (the default) records no origins at all: the positions are not left to be recovered later from the
+    flattened order, which is `submission_index` and diverges from the page position as soon as a second
+    page contributes a candidate.
     """
     pages = list(pages)
+    if page_analysis_run_ids is not None and len(page_analysis_run_ids) != len(pages):
+        raise ValueError(
+            f"page_analysis_run_ids has {len(page_analysis_run_ids)} entries for {len(pages)} pages; "
+            "they must align one-to-one (a page's reading is never attributed to another page's run)."
+        )
     raw_connections: list[dict[str, Any]] = []
+    origins: list[CandidateOrigin | None] = []
     parse_failed: list[Any] = []
     analysed: list[Any] = []
     unusable: list[tuple[Any, Any]] = []
 
-    for page in pages:
+    for page_position, page in enumerate(pages):
         page_number = _field(page, "page_number")
         if _field(page, "parse_failed", False):
             parse_failed.append(page_number)
@@ -134,9 +151,16 @@ def intake_page_extractions(
         if not isinstance(entries, (list, tuple)):
             unusable.append((page_number, copy.deepcopy(entries)))
             continue
-        for entry in entries:
+        # The page's OWN array, at its own length: position i here is position i in the
+        # recorded `raw_connections` of this page, whatever the flattened list does later.
+        page_origins = origins_for_page(
+            entries,
+            analysis_run_id=None if page_analysis_run_ids is None else page_analysis_run_ids[page_position],
+        )
+        for entry_position, entry in enumerate(entries):
             if isinstance(entry, dict):
                 raw_connections.append({**entry, "page_num": page_number})
+                origins.append(page_origins[entry_position])
             else:
                 unusable.append((page_number, copy.deepcopy(entry)))
 
@@ -148,6 +172,7 @@ def intake_page_extractions(
         source_drawing_id=source_drawing_id,
         drawing_number=drawing_number,
         known_member_marks=known_member_marks,
+        origins=origins,
     )
     return ProjectExtractionIntake(
         collection=collection,

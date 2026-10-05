@@ -21,3 +21,15 @@ PDF_VISION_MODEL = os.environ.get("PDF_VISION_MODEL", "claude-sonnet-4-6")
 # Safety cap on pages processed per upload, so a mis-uploaded 300-page
 # PDF doesn't silently rack up a huge API bill on one project.
 MAX_PDF_PAGES = int(os.environ.get("MAX_PDF_PAGES", "30"))
+
+# Where the fabrication artifact layer builds an artifact before it is verified
+# and uploaded. Deliberately has NO default: a fabricated drawing is a
+# deliverable, and writing it into whatever directory the process happened to
+# start in — or into a shared /tmp — is how one project's drawing ends up beside
+# another's. Unset means the artifact layer refuses, at use time, rather than
+# guessing a location. Read with .get, not [...], for the same reason
+# ANTHROPIC_API_KEY is: this module is imported by much of the service, and a
+# key that is only needed on the fabrication path must not break every other
+# import. `app.production_fabrication_artifact` validates it (absolute,
+# creatable, writable) before use.
+ARTIFACT_WORKING_DIR = os.environ.get("ARTIFACT_WORKING_DIR")

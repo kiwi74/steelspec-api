@@ -63,6 +63,20 @@ existing 7AJ, 7Y and 7AZ builders unchanged.
 It writes nothing, calls no AI, resolves nothing and generates nothing, and it
 is the fifth module rather than a change to any of the four: the identity,
 authorization, read and binding boundaries J19 established are untouched.
+
+ADDED BY J46 — THE RESUMER
+==========================
+`project_workflow_resumption.py` reconstructs a project's CURRENT review
+workflow from revision 0 plus the revisions J22 persisted, without the process
+that produced them. It replays recorded outcomes as state rather than by
+re-running anything: no generator, no verifier, no dispatch, no upload, no
+claim, no AI call. It carries the ten-key agreement guard that compares a
+rebuilt connection state against the persisted one, and the reusable
+pre-validation seam that refuses a resolution whose task is not the target
+connection's before any part of it is applied.
+
+It is the sixth module beside the other five, not a change to any of them, and
+it writes nothing at all.
 """
 
 from app.production_review import (
@@ -71,6 +85,7 @@ from app.production_review import (
     identity,
     project_read,
     project_workflow_reconstruction,
+    project_workflow_resumption,
 )
 
 __all__ = [
@@ -79,4 +94,5 @@ __all__ = [
     "identity",
     "project_read",
     "project_workflow_reconstruction",
+    "project_workflow_resumption",
 ]

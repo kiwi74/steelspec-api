@@ -177,6 +177,11 @@ class ReconstructedProjectWorkflow:
     accumulated: AccumulatedAnalysis
     captures_read: int
     capture_run_ids: tuple[str, ...]
+    #: The durable document this lineage read (Milestone J61), or None when the drawing
+    #: names none — a lineage created before J61, or one whose source could not be
+    #: identified. It is stated rather than derived a second time, so a caller that
+    #: EXPLICITLY selected a document can see which one the reconstruction used.
+    document_id: str | None = None
 
     @property
     def parse_failed_pages(self) -> tuple[Any, ...]:
@@ -273,6 +278,7 @@ def reconstruct_project_workflow(
     section_matcher,
     repository=None,
     request_material_specification: bool = False,
+    document_id: str | None = None,
 ) -> ReconstructedProjectWorkflow | None:
     """Reconstructs one project's revision-0 workflow from its persisted reading.
 
@@ -289,9 +295,34 @@ def reconstruct_project_workflow(
     it defaults to the production repository, imported inside this function so that
     importing this module does not pull the database client into a process that
     never reads one.
+
+    `document_id` (Milestone J61) names WHICH source document of the project this
+    workflow is about, and it is `None` by default so that a caller which has never
+    heard of it gets exactly the behaviour it got before:
+
+      - `None`, one document with readings        -> that document, as before
+      - `None`, no document with readings         -> RECONSTRUCTION_NO_CAPTURE
+      - `None`, more than one with readings       -> RECONSTRUCTION_AMBIGUOUS_DOCUMENT
+      - a document id, that document has readings -> THAT document, however many others
+                                                     the project has
+
+    A document is NEVER chosen here. Not by page count, not by how many readings a
+    document has, not by recency, not by role, not by filename, and not by how many
+    evidence rows it produced: a guess between two documents would record a review of
+    one while the other's evidence sat beside it, indistinguishable afterwards. So
+    when the caller names none and more than one is readable, the refusal stands.
+
+    A NAMED document that has no reading of this project's is refused as
+    `RECONSTRUCTION_NO_CAPTURE` — there is nothing to reconstruct — and the detail
+    states the document, so the two no-reading cases are told apart by the statement
+    rather than by a second refusal code. A named document with more than one reading
+    lineage is still `RECONSTRUCTION_AMBIGUOUS_DOCUMENT`: which lineage's readings
+    those are is exactly as unstated as it was before.
     """
     if not (isinstance(project_id, str) and project_id.strip()):
         raise ValueError("project_id must be a non-empty str.")
+    if document_id is not None and not (isinstance(document_id, str) and document_id.strip()):
+        raise ValueError("document_id must be a non-empty str, or None.")
 
     if repository is None:
         from app.engineering_data import repository as project_store
@@ -317,7 +348,22 @@ def reconstruct_project_workflow(
         if rows:
             documents.append((drawing_set_id, drawing, rows))
 
+    # Milestone J61 — the caller's own document, when it named one. This is a FILTER over
+    # the project's own documents, never a lookup that could reach another project's, and
+    # it removes a candidate only by the identity the caller stated.
+    if document_id is not None:
+        documents = [
+            candidate for candidate in documents
+            if _text(candidate[1].get("document_id")) == document_id
+        ]
+
     if not documents:
+        if document_id is not None:
+            raise ReconstructionRefused(
+                RECONSTRUCTION_NO_CAPTURE,
+                f"document {document_id!r} of project {project_id!r} has no persisted AI "
+                "reading; a workflow is reconstructed from a reading and from nothing else",
+            )
         raise ReconstructionRefused(
             RECONSTRUCTION_NO_CAPTURE,
             f"no document of project {project_id!r} has a persisted AI reading; the "
@@ -325,6 +371,14 @@ def reconstruct_project_workflow(
             "is not backfilled",
         )
     if len(documents) > 1:
+        if document_id is not None:
+            raise ReconstructionRefused(
+                RECONSTRUCTION_AMBIGUOUS_DOCUMENT,
+                f"document {document_id!r} of project {project_id!r} has "
+                f"{len(documents)} drawings carrying persisted AI readings; which of them "
+                "these pages belong to is exactly as unstated as it was before, and a "
+                "reading lineage is not chosen here",
+            )
         raise ReconstructionRefused(
             RECONSTRUCTION_AMBIGUOUS_DOCUMENT,
             f"{len(documents)} documents of project {project_id!r} carry persisted AI "
@@ -359,6 +413,12 @@ def reconstruct_project_workflow(
     chosen = authoritative_captures(rows)
     payloads = accumulated_page_mappings(rows)
     run_ids = tuple(dict.fromkeys(str(row["analysis_run_id"]) for row in chosen))
+    # J72 — WHICH run read each page. `chosen` is the reading that stands for each page
+    # (J23's own rule), so its `analysis_run_id` is the attempt that produced the
+    # candidates this page contributes — the run a candidate's origin names. It is taken
+    # from the row that was actually selected, never from the run that merely stands for
+    # the document today.
+    page_run_ids = {row["page_number"]: str(row["analysis_run_id"]) for row in chosen}
 
     # 7AZ's own accumulation, from the document's own page count. It validates the
     # reading (no page outside the document, no page twice, no parse failure
@@ -376,6 +436,7 @@ def reconstruct_project_workflow(
         project_id=project_id,
         source_drawing_id=drawing_id,
         known_member_marks=tuple(member_rows),
+        page_analysis_run_ids=page_run_ids,
     )
 
     # The collection is the intake's OWN collection object, not an equal copy:
@@ -398,4 +459,5 @@ def reconstruct_project_workflow(
         accumulated=accumulated,
         captures_read=len(chosen),
         capture_run_ids=run_ids,
+        document_id=_text(drawing.get("document_id")),
     )

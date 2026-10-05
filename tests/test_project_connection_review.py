@@ -621,6 +621,7 @@ def test_the_module_imports_no_cad_assembly_validation_or_drawing_code():
             imported.add(node.module)
     assert imported == {
         "copy", "dataclasses", "collections.abc", "typing",
+        "app.cad_engine.candidate_origin_address",
         "app.cad_engine.connection_review_package", "app.cad_engine.reviewed_connection_specification",
     }
 

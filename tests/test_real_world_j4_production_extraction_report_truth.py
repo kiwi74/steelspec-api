@@ -335,18 +335,79 @@ class _RecordingRepository:
         # Milestone J23: the raw AI readings production records before it records any
         # row derived from them. Held so a test can see the capture this run wrote.
         self.captures = []
+        # Milestone J36: the PDF's own annotation occurrences (J28), recorded in the same
+        # run and read by nothing. Held so a test can see they were written, and under
+        # which drawing/run identity.
+        self.annotation_occurrences = []
         # The order the stores were asked for, for the one claim that is about order:
         # that a run's reading is recorded before anything derived from it.
         self.order = []
         self.drawing_set_updates = []
+        # Milestone J61: the source documents this repository was asked to record, and the
+        # lineage→document links each drawing write carried. Held so a test can see the
+        # identity a run established and that the drawing it created points at it.
+        self.documents = []
+        self.documents_by_content = {}
+        self.document_links = []
+        self.document_page_counts = []
         self._ids = itertools.count(1)
+
+    # --- source document identity (Milestone J61) --------------------------
+    def create_project_document(self, project_id, *, storage_path, file_name,
+                                source_format=None, byte_size=None, page_count=None,
+                                content_sha256=None, role="UNKNOWN", revision_label=None,
+                                supersedes_document_id=None):
+        """The document a run reads, recorded — and recorded ONCE per proven identity.
+
+        The double carries the production contract rather than a simplified one: where a
+        hash is given, `(project_id, content_sha256)` is the identity, so a second call
+        with the same bytes hands back the row the first call created instead of a second
+        one. A double that created a row per call would let a pipeline that re-reads one
+        document look correct here while inventing a second document in production, which
+        is the whole defect J61 exists to close.
+        """
+        self.order.append("create_project_document")
+        if content_sha256 is not None:
+            existing = self.documents_by_content.get((project_id, content_sha256))
+            if existing is not None:
+                return dict(existing)
+        row = {
+            "id": f"doc-{next(self._ids)}",
+            "project_id": project_id,
+            "storage_path": storage_path,
+            "file_name": file_name,
+            "source_format": source_format,
+            "byte_size": byte_size,
+            "page_count": page_count,
+            "content_sha256": content_sha256,
+            "role": role,
+            "revision_label": revision_label,
+            "supersedes_document_id": supersedes_document_id,
+        }
+        self.documents.append(row)
+        if content_sha256 is not None:
+            self.documents_by_content[(project_id, content_sha256)] = row
+        return dict(row)
+
+    def update_document_page_count(self, document_id, page_count):
+        """The count the reading established, recorded against the document itself."""
+        self.document_page_counts.append({"id": document_id, "page_count": page_count})
+        for row in self.documents:
+            if row["id"] == document_id:
+                row["page_count"] = page_count
 
     # --- drawing set / drawing / analysis run -----------------------------
     def create_drawing_set(self, project_id, name):
         return {"id": f"ds-{next(self._ids)}", "project_id": project_id, "name": name}
 
-    def create_drawing(self, drawing_set_id, file_name, storage_path):
-        return {"id": f"dr-{next(self._ids)}", "drawing_set_id": drawing_set_id}
+    def create_drawing(self, drawing_set_id, file_name, storage_path, document_id=None):
+        # Milestone J61: a drawing is created pointing at the source document the run read,
+        # which the pipeline records immediately above it. The argument is carried here for
+        # the same reason the real function takes it: the linkage is part of the write.
+        self.document_links.append({"drawing_set_id": drawing_set_id,
+                                    "document_id": document_id})
+        return {"id": f"dr-{next(self._ids)}", "drawing_set_id": drawing_set_id,
+                "document_id": document_id}
 
     def create_analysis_run(self, drawing_set_id, model_used):
         return {"id": f"ar-{next(self._ids)}", "drawing_set_id": drawing_set_id}
@@ -376,6 +437,20 @@ class _RecordingRepository:
         """
         self.order.append("insert_page_extraction_captures")
         self.captures.extend(copy.deepcopy(rows or []))
+        return len(rows or [])
+
+    # --- the PDF's own annotation reading (Milestone J36) ------------------
+    def insert_pdf_annotation_occurrences(self, rows):
+        """Records one PDF reading's annotation occurrences, in one call (J28's write).
+
+        J36 wires this call into every extraction path, so the double has to answer it
+        or an extraction here would reach `AttributeError` instead of the code under
+        test. It stores the rows verbatim and returns how many, exactly as the real
+        helper does, and it records the call in `order` so the position J36 chose is
+        assertable on the same sequence the J23 ordering claim is made on.
+        """
+        self.order.append("insert_pdf_annotation_occurrences")
+        self.annotation_occurrences.extend(copy.deepcopy(rows or []))
         return len(rows or [])
 
     # --- members ----------------------------------------------------------

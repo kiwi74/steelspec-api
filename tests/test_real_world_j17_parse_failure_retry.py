@@ -64,8 +64,11 @@ from __future__ import annotations
 import ast
 import copy
 import re
+from urllib.parse import unquote
 
+import httpx
 import pytest
+from yarl import URL
 
 from tests import production_review_auth as auth
 from tests import test_real_world_j13_project_status_truth as j13
@@ -1256,20 +1259,30 @@ class _Downloads:
 
     A background task downloads the file it was pointed at and hands it to the
     pipeline; nothing else about the client is needed to test that.
+
+    Since J37C-8Q the task reads through `app.storage_download`, which reaches the
+    object endpoint through storage3's own bucket proxy rather than through
+    `download()`. So this stands in for the proxy and the HTTP client under it — the
+    substitution boundary is the NETWORK, not the download call — and `paths` still
+    records the object path the task asked for, which is what these tests assert on.
     """
 
     def __init__(self, content=b""):
         self.content = content
         self.paths = []
         self.storage = self
+        self.id = "uploads"
+        self._base_url = URL("https://storage.invalid/storage/v1/")
+        self._headers = httpx.Headers({"Authorization": "Bearer test-not-a-real-key"})
+        self._client = httpx.Client(transport=httpx.MockTransport(self._serve))
+
+    def _serve(self, request):
+        self.paths.append(unquote(request.url.path.split("/object/uploads/", 1)[1]))
+        return httpx.Response(200, content=self.content)
 
     def from_(self, bucket):
         assert bucket == "uploads", bucket
         return self
-
-    def download(self, path):
-        self.paths.append(path)
-        return self.content
 
 
 class TestTheHttpSurface:
@@ -1479,13 +1492,30 @@ class TestScopeAndPurity:
         all exactly as they were. What it adds is a record of the attempt, and a record is
         not a decision.
 
-        The five names are pinned exactly."""
+        J28 added a sixth. It is not this milestone's subject and not its claim either:
+        it records PDF annotation occurrences read from the drawing, the retry neither
+        writes nor reads one, and the record the retry reads (`projects.warnings`), the
+        refusal it issues and the run it creates are still exactly as they were. (J28A is
+        the bookkeeping step that recorded the name here.)
+
+        J44 added a seventh. It is not this milestone's subject and not its claim: it places
+        one project-keyed claim row and reads no page and no failure, so the record the retry
+        reads (`projects.warnings`), the refusal it issues and the run it creates are still
+        exactly as they were. J61 added an eighth, which reads no page and no failure either:
+        it gives a source document an identity and points a drawing at it, and it writes
+        nothing to `projects.warnings`, so the refusal this file pins is unmoved.
+
+        The eight names are pinned exactly."""
         assert set(j13.MIGRATIONS) == {
             "20260924000000_j5_section_resolution_truth.sql",
             "20260924010000_j6_reference_data_identity.sql",
             "20260924020000_j8b_connection_plate_evidence_nullability.sql",
             "20260925000000_j22_connection_review_persistence.sql",
             "20260925010000_j23_page_extraction_captures.sql",
+            "20260927000000_j28_pdf_annotation_occurrences.sql",
+            "20260928000000_j44_project_review_claims.sql",
+            "20260929000000_j61_project_documents.sql",
+            "20260929010000_j66_field_evidence_citations.sql",
         }
         migrations = sorted(path.name for path in (REPO / "supabase" / "migrations").glob("*.sql"))
         assert migrations == sorted(j13.MIGRATIONS)
@@ -1520,7 +1550,14 @@ class TestScopeAndPurity:
                         and any(token in node.id.lower() for token in fuzzy)], path.name
 
     def test_nothing_here_became_a_cad_engine_subsystem(self):
-        for path in (PARSE_FAILURES_PATH, PIPELINE_PATH, MAIN_PATH):
+        """No module of the extraction pipeline reaches into the CAD engine.
+
+        J47's route does, and only in the sense this test is actually about: it imports
+        five REFUSAL TYPES so it can answer each with a status, and imports no builder, no
+        state and no module object. That exception is stated as the exact set of names
+        below rather than as a blanket allowance, and it is confined to `main.py` — the
+        pipeline's own two modules still name the CAD engine nowhere at all."""
+        for path in (PARSE_FAILURES_PATH, PIPELINE_PATH):
             source = path.read_text(encoding="utf-8")
             assert "cad_engine" not in source, path.name
             tree = ast.parse(source)
@@ -1529,6 +1566,21 @@ class TestScopeAndPurity:
                     names = ([alias.name for alias in node.names] if isinstance(node, ast.Import)
                              else [node.module or ""])
                     assert not any(name.startswith("app.cad_engine") for name in names), path.name
+
+    def test_the_one_cad_engine_import_in_the_app_is_refusal_types_only(self):
+        tree = ast.parse(MAIN_PATH.read_text(encoding="utf-8"))
+        imported = [
+            (node.module, tuple(alias.name for alias in node.names))
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and (node.module or "").startswith("app.cad_engine")
+        ]
+        assert len(imported) == 1, imported
+        module, names = imported[0]
+        assert module == "app.cad_engine.project_workflow", module
+        for name in names:
+            assert name.endswith("Error"), name
+        assert MAIN_PATH.read_text(encoding="utf-8").count("cad_engine") == 1
 
     def test_the_retry_vocabulary_is_the_contracts_own(self, parse_failures):
         for name in RETRY_CODES:

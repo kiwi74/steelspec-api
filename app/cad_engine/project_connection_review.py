@@ -105,6 +105,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from app.cad_engine.candidate_origin_address import CandidateOrigin
 from app.cad_engine.connection_review_package import (
     REVIEW_STATE_AI_EXTRACTED,
     REVIEW_STATE_READY_FOR_PIPELINE,
@@ -170,11 +171,20 @@ class ConnectionCandidate:
     caller-supplied or None (never invented); `review_package_id` and
     `submission_index` are assigned from submission order and carry no
     engineering meaning.
+
+    `origin` (J72) is WHERE this candidate was read from — the analysis run and
+    the candidate's own position in that page's `raw_connections` array. It is
+    None when the caller could not state it, and it is never derived here: a
+    candidate the caller could not address is carried without an address rather
+    than with a plausible one. Note that it is NOT `submission_index`: that is a
+    position in the flattened multi-page submission order, and the two numbers
+    agree only while a single page contributes every candidate.
     """
     review_package_id: str
     submission_index: int
     source_identity: str | None
     package: ConnectionReviewPackage
+    origin: CandidateOrigin | None = None
 
     @property
     def extraction(self) -> AIExtractedConnection:
@@ -218,6 +228,7 @@ def create_project_connection_collection(
     drawing_number: str | None = None,
     known_member_marks: Collection[str] | None = None,
     source_identities: Sequence[str | None] | None = None,
+    origins: Sequence[CandidateOrigin | None] | None = None,
 ) -> ProjectConnectionReviewCollection:
     """
     Wraps every raw AI connection object (the shape app/pipeline.py flattens into
@@ -225,11 +236,22 @@ def create_project_connection_collection(
     7W package. `source_identities`, if given, must align one-to-one with
     `raw_connections`; without it every source_identity is None. The raw
     objects are not mutated. Order of `raw_connections` is submission order only.
+
+    `origins` (J72), if given, must likewise align one-to-one: each is the
+    candidate's `CandidateOrigin` or None where the caller could not address it.
+    They are carried VERBATIM. Nothing here recomputes one from `index`, from
+    `page_num`, or from the neighbour it was submitted beside — an origin arrives
+    already stated by the producer that held the page, or it does not arrive.
     """
     if source_identities is not None and len(source_identities) != len(raw_connections):
         raise ValueError(
             f"source_identities has {len(source_identities)} entries for {len(raw_connections)} connections; "
             "they must align one-to-one (identities are never guessed)."
+        )
+    if origins is not None and len(origins) != len(raw_connections):
+        raise ValueError(
+            f"origins has {len(origins)} entries for {len(raw_connections)} connections; "
+            "they must align one-to-one (an origin is never taken from a neighbouring candidate)."
         )
     known = None if known_member_marks is None else tuple(known_member_marks)
     candidates = []
@@ -242,6 +264,7 @@ def create_project_connection_collection(
             submission_index=index,
             source_identity=None if source_identities is None else source_identities[index],
             package=create_review_package(extraction, None, known),
+            origin=None if origins is None else origins[index],
         ))
     return ProjectConnectionReviewCollection(tuple(candidates), known, project_id)
 

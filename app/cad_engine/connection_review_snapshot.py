@@ -87,10 +87,12 @@ from app.cad_engine.automation_gate import (
     AUTOMATION_DECISION_REVIEW,
     AUTOMATION_DECISIONS,
 )
+from app.cad_engine.candidate_origin_address import CandidateOrigin, origin_of, with_origin
 from app.cad_engine.connection_review_package import (
     AIExtractedBolt,
     AIExtractedPlate,
     AIExtractedWeld,
+    ENGINEERING_FIELDS,
 )
 from app.cad_engine.drawing_dispatch import OUTPUT_STATUSES
 from app.cad_engine.drawing_output_verification import VERIFICATION_STATUSES
@@ -108,16 +110,21 @@ from app.cad_engine.review_contract import (
     ACTION_REFRESH,
     ACTION_RESOLVE,
     ACTION_REVIEW,
+    CITATION_DERIVATION,
+    CITATION_KINDS,
+    CITATION_SOURCE,
     REVIEW_CONTRACT_SCOPE_STATEMENT,
     SEVERITY_BLOCKING,
     SEVERITY_WARNING,
     ConnectionReviewContract,
     ProjectReviewContract,
     ReviewEvidenceInfo,
+    _citation_infos,
     _display,
     _finding_info,
     _provenance_infos,
     _task_info,
+    field_standings,
 )
 
 SNAPSHOT_SCOPE_STATEMENT = (
@@ -230,6 +237,131 @@ ITEM_CHECK_VOCABULARY: dict[str, tuple[str, ...]] = {
     "output_status": OUTPUT_STATUSES,
     "verification_status": VERIFICATION_STATUSES,
 }
+
+# ======================================================================================
+# 1b. The citation table (J66) — the third table of the same review chain.
+# ======================================================================================
+# J21 folded five of J20's six proposed tables away because each was a 1:1 attribute group of
+# one connection with no lifecycle and no query of its own. A CITATION is the case that
+# argument does not reach, and J65 decided it on that ground rather than by taste:
+#
+#   * it is not 1:1 — one connection has at most one provenance label per field but ANY
+#     number of citations per field, so there is no column it could be folded into;
+#   * it has a query of its own — "where did this field's content come from, and is that
+#     evidence still the evidence?" — which json cannot answer without reading every item;
+#   * the association it must carry is STRUCTURAL. It has to be impossible to record a
+#     citation of one project's connection that points at another project's reading, and a
+#     json payload can promise that only in Python, where nothing enforces it. A composite
+#     foreign key and an ownership trigger can.
+#
+# A citation is an ADDRESS, never a value: there is no value, chosen_value, confidence, rank,
+# is_primary, winner or resolved column here, and no document_role or drawing_number either.
+# The content stays in exactly one copy, in the reading the citation names.
+
+CITATION_TABLE = "connection_review_item_citations"
+
+# (project_id, review_revision, review_package_id) is not a standalone key: it is the ITEM's
+# key, which is what makes the citation's owner a fact rather than a claim.
+CITATION_PRIMARY_KEY = (
+    "project_id", "review_revision", "review_package_id", "field_name", "ordinal",
+)
+CITATION_ITEM_FOREIGN_KEY = (
+    ("project_id", "review_revision", "review_package_id"), ITEM_PRIMARY_KEY,
+)
+# The cited page reading, identified exactly as J23 identifies it, and the cited occurrence,
+# identified exactly as J28 identifies it. The occurrence foreign key is INERT while its three
+# coordinates are NULL, which is the wanted behaviour: it is enforced when it is stated.
+CITATION_CAPTURE_FOREIGN_KEY = ("drawing_id", "page_number", "analysis_run_id")
+CITATION_OCCURRENCE_FOREIGN_KEY = CITATION_CAPTURE_FOREIGN_KEY + (
+    "annotation_x", "annotation_y", "extractor_version",
+)
+CITATION_FIELD_NAMES: tuple[str, ...] = ENGINEERING_FIELDS
+
+# (column, SQL type, nullable, why it exists)
+CITATION_TABLE_COLUMNS: tuple[tuple[str, str, bool, str], ...] = (
+    ("project_id", "uuid", False,
+     "The review item's project: the citation's owner, and half of the composite item key."),
+    ("review_revision", "integer", False,
+     "The review item's revision, recorded verbatim. The citation has no revision of its "
+     "own — it is the ITEM's revision, so the two cannot drift apart."),
+    ("review_package_id", "text", False,
+     "The reviewed connection whose field this citation accounts for."),
+    ("field_name", "text", False,
+     "WHICH engineering field. The vocabulary is ENGINEERING_FIELDS, the review package's own "
+     "authoritative list; an unrecognised field fails the CHECK rather than becoming a "
+     "silent category."),
+    ("ordinal", "integer", False,
+     "RECORDING ORDER ONLY, 1-based, and never a priority: it orders the citations of one "
+     "field and is compared with no other quantity. It is part of the primary key because "
+     "two citations of one field are two facts."),
+    ("citation_kind", "text", False,
+     "How the field's content relates to the cited reading: SOURCE (taken from it) or "
+     "DERIVATION (computed or interpreted from it). A closed pair with no quality, no "
+     "confidence and no precedence."),
+    ("document_id", "uuid", True,
+     "The document the cited reading was taken over, or NULL when it predates document "
+     "identity or was taken without it. NULL is NOT a wildcard: it matches nothing."),
+    ("drawing_id", "uuid", False,
+     "The cited reading's drawing. Part of the reading's identity, never a display name."),
+    ("page_number", "integer", False,
+     "The cited reading's page, 1-based, exactly as the evidence tables record it."),
+    ("analysis_run_id", "uuid", False,
+     "The cited reading's attempt. It is what makes a re-read a NEW READING rather than a "
+     "collision, which is why a citation is never reducible to a page number."),
+    ("annotation_x", "numeric(9,2)", True,
+     "The cited occurrence's device x, or NULL when the citation names the page reading and "
+     "not one particular occurrence on it."),
+    ("annotation_y", "numeric(9,2)", True,
+     "The cited occurrence's device y (top-left convention, as the extractor reports it)."),
+    ("extractor_version", "text", True,
+     "The rule set the occurrence was read under. Present exactly when the positions are: a "
+     "position without its rule set is not an occurrence identity."),
+    ("anchor", "json", False,
+     "The locator WITHIN the cited reading — the drawn token, the detail reference, the "
+     "nearby text. An attribute of the ADDRESS, never the field's value."),
+    ("recorded_at", "timestamptz", False,
+     "When the citation row was written (database default). Temporal provenance, read by "
+     "nothing the contract exposes."),
+)
+
+CITATION_CHECK_VOCABULARY: dict[str, tuple[str, ...]] = {
+    "field_name": CITATION_FIELD_NAMES,
+    "citation_kind": CITATION_KINDS,
+}
+
+# No extra index: the read path asks for one revision's citations (the primary key's leading
+# columns) and nothing else, and no cited row is ever deleted (every foreign key restricts).
+CITATION_DECLARED_INDEXES: tuple[str, ...] = ()
+
+CITATION_APPEND_ONLY_RULE = (
+    "no UPDATE, no DELETE and no upsert, for every role: a later reading of a field is a NEW "
+    "row with the next ordinal, never an edit of an old one, and a recorded citation is never "
+    "removed. There is no mutable-table exception here"
+)
+
+CITATION_OWNERSHIP_RULE = (
+    "a citation can never cross a project boundary. The drawing a reading was taken from "
+    "carries no project_id of its own, so the foreign keys alone cannot connect the cited "
+    "reading to the citation's project; a BEFORE "
+    "INSERT guard reads the cited capture's, occurrence's and document's own project_id and "
+    "refuses when one is not the citation's. A citation from project A to evidence belonging "
+    "to project B is impossible to insert"
+)
+
+# The codes the citation table's own triggers and constraints raise. They are the DATABASE's
+# words, preserved rather than retranslated, so a caller reads the same refusal the table
+# made. None of them is decided in Python: an unknown field, a crossed project boundary and a
+# rewrite are all refused by the table itself, where the fact is.
+CITATION_REFUSED_EVIDENCE_UNKNOWN = "CITATION_REFUSED_EVIDENCE_UNKNOWN"
+CITATION_REFUSED_FOREIGN_EVIDENCE = "CITATION_REFUSED_FOREIGN_EVIDENCE"
+CITATION_REFUSED_APPEND_ONLY = "CITATION_REFUSED_APPEND_ONLY"
+
+CITATION_RLS_RULE = (
+    "RLS enabled with NO policy for anon/authenticated, exactly as the two tables above: the "
+    "citations are unreadable except through the service-role server, which re-enforces "
+    "projects.user_id through the review item. No reviewer role, no ownership column here, no "
+    "membership table"
+)
 
 # No extra index is declared: the read path performs exactly two lookups and the primary
 # keys serve both — (a) one snapshot of one project at one revision, (b) the highest
@@ -456,6 +588,16 @@ SNAPSHOT_REFUSED_REVISION_GAP = "SNAPSHOT_REFUSED_REVISION_GAP"
 SNAPSHOT_REFUSED_UNREPRESENTABLE = "SNAPSHOT_REFUSED_UNREPRESENTABLE"
 SNAPSHOT_REFUSED_DUPLICATE_PACKAGE_ID = "SNAPSHOT_REFUSED_DUPLICATE_PACKAGE_ID"
 
+# J77 — the ONE refusal this milestone adds, and it is deliberately one rather than a
+# family. It is raised when the previous revision and this revision do not describe the
+# same connections at the same recorded addresses, which is a single failure with two
+# faces: a connection the previous revision recorded that this workflow does not have (or
+# the reverse), and a candidate origin that the previous revision recorded and this
+# reconstruction no longer derives. Both are the same statement — the record and the
+# reconstruction have diverged — and the `statement` names which one, so a caller that
+# only reads codes still loses nothing.
+SNAPSHOT_REFUSED_PRIOR_REVISION_DIVERGED = "SNAPSHOT_REFUSED_PRIOR_REVISION_DIVERGED"
+
 
 class SnapshotRefused(ValueError):
     """
@@ -500,11 +642,46 @@ class ReviewSnapshotItem:
 
 
 @dataclass(frozen=True)
+class ReviewFieldCitation:
+    """
+    ONE recorded citation: an ADDRESS for one engineering field of one reviewed connection,
+    decoded from its row and never repaired.
+
+    It carries no value. The field's content is not here and is not copied here — it stays in
+    exactly one place, in the reading this citation names, and a reader that wants it reads
+    the evidence the citation points at. That is the whole difference between a citation and
+    a second copy of the answer.
+
+    `document_id` is None when the cited reading predates document identity or was taken
+    without it; None matches nothing and is never a wildcard. The three occurrence columns
+    are all present or all None. `ordinal` is the recording order within its field and is
+    never a priority. `project_id` and `review_revision` are the ITEM's, carried so a row is
+    self-describing; they are not a second revision system.
+    """
+
+    project_id: str
+    review_revision: int
+    review_package_id: str
+    field_name: str
+    ordinal: int
+    citation_kind: str
+    document_id: str | None
+    drawing_id: str
+    page_number: int
+    analysis_run_id: str
+    annotation_x: object
+    annotation_y: object
+    extractor_version: str | None
+    anchor: object
+
+
+@dataclass(frozen=True)
 class ReviewSnapshot:
     """
     One project's review state at one 7AJ revision: the header facts (project, revision,
-    the evidence the review was computed from, the project's own gate decision) and one
-    item per connection, in the workflow's own connection order.
+    the evidence the review was computed from, the project's own gate decision), one
+    item per connection in the workflow's own connection order, and the citations recorded
+    against those connections' fields.
     """
 
     project_id: str
@@ -514,10 +691,48 @@ class ReviewSnapshot:
     evidence_run_ids: tuple[str, ...]
     items: tuple[ReviewSnapshotItem, ...]
     recorded_at: str | None = None
+    # J66, defaulted so every existing construction of this object is unchanged: a revision
+    # built by the writer carries NO citations (nothing in this system invents one — J66's
+    # own brief forbids every automatic writer), and a revision recorded before the citation
+    # table existed reads back with none either. An empty tuple here means "none are
+    # recorded", which the contract states as UNCITED rather than as an absence of a claim.
+    citations: tuple[ReviewFieldCitation, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evidence_identity", copy.deepcopy(self.evidence_identity))
         object.__setattr__(self, "items", tuple(self.items))
+        object.__setattr__(self, "citations", tuple(self.citations))
+
+    def citations_for(self, review_package_id: str) -> tuple[ReviewFieldCitation, ...]:
+        """One connection's citations, in recorded row order — the contract orders them."""
+        return tuple(
+            citation for citation in self.citations
+            if citation.review_package_id == review_package_id
+        )
+
+    def citation_rows_for(self, review_package_id: str) -> tuple[dict, ...]:
+        """One connection's citations as the rows a writer persists: plain data, in order.
+
+        `recorded_at` is left to the database default — this model never reads a clock — and
+        `project_id`/`review_revision` come from the item the citation belongs to, never from
+        an argument that could disagree with it.
+        """
+        return tuple(
+            {
+                "field_name": citation.field_name,
+                "ordinal": citation.ordinal,
+                "citation_kind": citation.citation_kind,
+                "document_id": citation.document_id,
+                "drawing_id": citation.drawing_id,
+                "page_number": citation.page_number,
+                "analysis_run_id": citation.analysis_run_id,
+                "annotation_x": citation.annotation_x,
+                "annotation_y": citation.annotation_y,
+                "extractor_version": citation.extractor_version,
+                "anchor": copy.deepcopy(citation.anchor),
+            }
+            for citation in self.citations_for(review_package_id)
+        )
 
     def to_rows(self) -> tuple[dict, tuple[dict, ...]]:
         """The persistable rows: one header row and its item rows, as plain data.
@@ -570,6 +785,10 @@ def _task_payload(task, *, where: str) -> dict:
         "answer_type": task.answer_type,
         "allowed_choices": list(task.allowed_choices),
         "evidence_requirement": task.evidence_requirement,
+        # J79 — the one engineering field this task addresses, or None. Written verbatim:
+        # it is the task model's own statement and is never re-derived from the task type
+        # here, so a value the model did not state cannot appear in a stored payload.
+        "field_name": task.field_name,
         "status": task.status,
         "resolution": None if resolution is None else {
             "task_id": resolution.task_id,
@@ -581,10 +800,36 @@ def _task_payload(task, *, where: str) -> dict:
     }, where=where)
 
 
+def _evidence_with_origin(
+    evidence: dict[str, Any], origin: CandidateOrigin | None, *, where: str
+) -> dict[str, Any]:
+    """The item's evidence with the candidate's origin carried into it (J72).
+
+    An origin is never built here and never completed here: a caller either holds the
+    address the candidate was read at or passes None, and a half-stated one is refused
+    rather than filled in from the reading it sits beside. `with_origin` leaves the two
+    keys ABSENT when there is none.
+    """
+    if origin is not None and not isinstance(origin, CandidateOrigin):
+        raise ValueError(
+            f"{where}.evidence: a candidate origin is a CandidateOrigin or None; "
+            f"{type(origin).__name__} is neither, and an address is never assembled here."
+        )
+    return with_origin(evidence, origin)
+
+
 def _item_from_stages(
-    state: ProjectConnectionState, *, extraction, report, group, where: str
+    state: ProjectConnectionState, *, extraction, report, group, where: str,
+    origin: CandidateOrigin | None = None,
 ) -> ReviewSnapshotItem:
-    """One item, built from the genuine stage results — the only way an item can exist."""
+    """One item, built from the genuine stage results — the only way an item can exist.
+
+    `origin` (J72) is the candidate's own address — the analysis run that read its page
+    and its ZERO-BASED position in that page's `raw_connections` — carried in from the
+    candidate this item is built from. It is recorded inside `evidence` verbatim, and a
+    caller that has none leaves the two keys ABSENT rather than recording a null, so a
+    payload written before J72 stays exactly as it was and keeps loading.
+    """
     readings = {
         "member_references": _payload(
             tuple(extraction.connected_member_references), where=f"{where}.member_references"
@@ -623,7 +868,7 @@ def _item_from_stages(
         blocker_codes=tuple(state.blockers),
         warning_codes=tuple(state.warnings),
         ai_readings=readings,
-        evidence={
+        evidence=_evidence_with_origin({
             "source_drawing_id": _payload(extraction.source_drawing_id,
                                           where=f"{where}.evidence.source_drawing_id"),
             "drawing_number": _payload(extraction.drawing_number,
@@ -634,7 +879,7 @@ def _item_from_stages(
                                          where=f"{where}.evidence.detail_reference"),
             "grid_reference": _payload(extraction.grid_reference,
                                        where=f"{where}.evidence.grid_reference"),
-        },
+        }, origin, where=where),
         provenance=_payload(dict(report.provenance), where=f"{where}.provenance"),
         tasks=tuple(
             _task_payload(task, where=f"{where}.tasks[{index}]")
@@ -644,6 +889,59 @@ def _item_from_stages(
     )
 
 
+def _carried_origin(
+    prior_origin: CandidateOrigin | None,
+    derived_origin: CandidateOrigin | None,
+    *,
+    touched: bool,
+    where: str,
+) -> CandidateOrigin | None:
+    """The origin ONE connection records at this revision (J77).
+
+    Three cases, and nothing stands between them:
+
+      * a PRIOR origin was recorded. It is carried, and it must equal what this
+        reconstruction derives — an address is never replaced by a later one, because a
+        revision that recorded RUN-A and whose evidence was rebuilt from RUN-B would be a
+        payload that contradicts itself. A divergence is refused rather than resolved.
+        (Equality is a sufficient condition for candidate equivalence: two equal origins
+        name the same immutable capture row and the same position in its array. The
+        converse does not hold — two different runs can state byte-identical candidates —
+        so refusing is deliberately conservative, and a re-read that changed nothing is
+        refused too.)
+      * no prior origin, and this is the revision that genuinely processed the connection
+        (`last_processed_revision == revision`). The derived origin is recorded. This is
+        the ONLY point at which an origin is acquired, because it is the only point at
+        which the connection is actually evaluated.
+      * no prior origin, and the connection was untouched. NOTHING is recorded: the two
+        keys stay ABSENT, exactly as J72 leaves them. Manufacturing an address here would
+        state that a revision which recorded none had recorded one.
+
+    The prior origin arrives already read by J72's own `origin_of`, so a payload that
+    half-states an address is refused by the rule that owns that vocabulary rather than
+    reinterpreted here.
+    """
+    if prior_origin is None:
+        return derived_origin if touched else None
+    if prior_origin != derived_origin:
+        derived = (
+            "no origin at all"
+            if derived_origin is None
+            else f"{derived_origin.analysis_run_id!r} at index {derived_origin.candidate_index}"
+        )
+        raise SnapshotRefused(
+            SNAPSHOT_REFUSED_PRIOR_REVISION_DIVERGED,
+            f"{where}.evidence: the previous revision recorded the candidate origin "
+            f"{prior_origin.analysis_run_id!r} at index {prior_origin.candidate_index}, and "
+            f"this reconstruction derives {derived}. The recorded address is the address "
+            "this revision answers, and it is never silently replaced by the reading that "
+            "stands for the page today — the two may name different candidates even when "
+            "their contents agree, so what would have to be invented to proceed is which "
+            "of them this revision's evidence describes.",
+        )
+    return prior_origin
+
+
 def build_review_snapshot(
     workflow,
     *,
@@ -651,6 +949,7 @@ def build_review_snapshot(
     evidence_rows: Mapping[str, Sequence[Mapping[str, Any]]],
     evidence_run_ids: Sequence[str] = (),
     previous_revision: int | None = None,
+    prior_items: Mapping[str, ReviewSnapshotItem] | None = None,
 ) -> ReviewSnapshot:
     """
     Builds the persistable snapshot of one genuine `ProjectWorkflowState`.
@@ -664,6 +963,29 @@ def build_review_snapshot(
     Nothing here reads a database, a clock, an environment variable or a file. The evidence
     fingerprint is computed from `evidence_rows`, which the caller reads through the
     project's existing readers, and the run ids are recorded verbatim.
+
+    `prior_items` (J77) is the PREVIOUS revision's items, keyed by `review_package_id`,
+    read by the caller from the recorded chain. It is optional and defaults to None, which
+    is the revision-0 path and behaves exactly as it did before this milestone.
+
+    Supplying it is what makes a recorded candidate origin survivable. Every connection's
+    item is re-emitted by every revision, and the collection those items are built from is
+    the CURRENT reconstruction — so without this argument an untouched connection would be
+    re-addressed from the reading that stands for its page today, which may not be the
+    reading the revision being extended recorded. With it:
+
+      * the prior revision and this workflow must name exactly the same package ids, or
+        the snapshot is refused. A package that has appeared or disappeared is a
+        lifecycle change this layer is not entitled to decide, and it invents no deletion
+        semantics to cover one.
+      * a connection whose origin the prior revision recorded carries that origin, and a
+        reconstruction that derives a different one is refused (see `_carried_origin`).
+      * a connection whose origin the prior revision did not record acquires one only if
+        this is the revision that genuinely processed it; otherwise the keys stay ABSENT.
+
+    A prior revision that cannot be read back is a refusal at the caller, never a
+    fallback to None here: reconstructing "no prior" from an unreadable prior is exactly
+    the substitution this argument exists to prevent.
     """
     if not isinstance(workflow, ProjectWorkflowState):
         raise TypeError(
@@ -718,6 +1040,33 @@ def build_review_snapshot(
             "review state per revision",
         )
 
+    # J77 — the prior revision and this one must name the SAME connections before a single
+    # item is built. This is checked AFTER the revision arithmetic above, deliberately: a
+    # caller whose chain moved under it must still get the gap refusal it already handles,
+    # not this one, and a prior revision this workflow is not the successor of is a gap
+    # rather than a divergence.
+    if prior_items is not None:
+        for package_id, prior in prior_items.items():
+            if not isinstance(prior, ReviewSnapshotItem):
+                raise TypeError(
+                    f"prior_items[{package_id!r}] is {type(prior).__name__}, not a review "
+                    "item; a previous revision is handed over as it was recorded, never as "
+                    "something that merely resembles an item"
+                )
+        appeared = sorted(set(package_ids) - set(prior_items))
+        disappeared = sorted(set(prior_items) - set(package_ids))
+        if appeared or disappeared:
+            raise SnapshotRefused(
+                SNAPSHOT_REFUSED_PRIOR_REVISION_DIVERGED,
+                f"the previous revision and this workflow do not describe the same "
+                f"package ids: {appeared} are in this workflow and not in the previous "
+                f"revision, {disappeared} are in the previous revision and not in this "
+                "workflow. A package appearing or disappearing is a lifecycle change "
+                "this layer does not decide, and it invents no deletion semantics to cover "
+                "one; the snapshot is refused rather than recorded against a different "
+                "project picture.",
+            )
+
     items = []
     for index, state in enumerate(workflow.connections):
         where = f"{project_id}@{revision}.{state.package_id}"
@@ -740,10 +1089,24 @@ def build_review_snapshot(
             if record.rerun_outcome is not None
             else candidate.package
         )
+        # The origin the candidate was read at, carried verbatim from the collection —
+        # never re-derived from this loop's position, which is submission order, nor from
+        # the rebuilt package's own numbering. J77 adds the other half: when a previous
+        # revision exists, what IT recorded is what this revision answers, so the derived
+        # address is either confirmed against it or the snapshot is refused.
+        origin = candidate.origin
+        if prior_items is not None:
+            origin = _carried_origin(
+                origin_of(prior_items[state.package_id].evidence),
+                candidate.origin,
+                touched=state.last_processed_revision == revision,
+                where=where,
+            )
         try:
             items.append(_item_from_stages(
                 state, extraction=package.extraction,
                 report=build_review_report(package), group=group, where=where,
+                origin=origin,
             ))
         except SnapshotRefused:
             raise
@@ -792,6 +1155,39 @@ def snapshot_item_from_row(row: Mapping[str, Any]) -> ReviewSnapshotItem:
     )
 
 
+def citation_from_row(row: Mapping[str, Any]) -> ReviewFieldCitation:
+    """One citation as it comes back from the database — decoded, never repaired, never
+    filled in. A missing column is refused for the same reason an item's is: a missing
+    column and a NULL column would otherwise look the same."""
+    if not isinstance(row, Mapping):
+        raise TypeError("a citation row must be a mapping")
+    missing = [name for name, _, _, _ in CITATION_TABLE_COLUMNS if name not in row]
+    if missing:
+        raise ValueError(
+            f"the citation row is missing {missing}; a partially read citation is never "
+            "presented, because a missing column and an empty one would look the same"
+        )
+    return ReviewFieldCitation(
+        project_id=row["project_id"],
+        review_revision=row["review_revision"],
+        review_package_id=row["review_package_id"],
+        field_name=row["field_name"],
+        ordinal=row["ordinal"],
+        citation_kind=row["citation_kind"],
+        document_id=row["document_id"],
+        drawing_id=row["drawing_id"],
+        page_number=row["page_number"],
+        analysis_run_id=row["analysis_run_id"],
+        # Verbatim, NOT `_decode`d: a coordinate is not one of the encoded payloads — the
+        # tuple tag exists for recorded human/AI values, and applying it here would be
+        # normalising a value that was never encoded.
+        annotation_x=row["annotation_x"],
+        annotation_y=row["annotation_y"],
+        extractor_version=row["extractor_version"],
+        anchor=_decode(row["anchor"]),
+    )
+
+
 def snapshot_from_rows(
     header: Mapping[str, Any], items: Sequence[Mapping[str, Any]]
 ) -> ReviewSnapshot:
@@ -832,6 +1228,11 @@ def _task_from_row(row: Mapping[str, Any]) -> ExceptionResolutionTask:
         answer_type=row["answer_type"],
         allowed_choices=tuple(row["allowed_choices"]),
         evidence_requirement=row["evidence_requirement"],
+        # J79 — read back through `.get`, so a payload recorded before this key existed reads
+        # as None (the task addressed exactly what it used to) rather than failing to load.
+        # A payload that states a value outside ENGINEERING_FIELDS is REFUSED by the task
+        # model itself; it is never dropped, coerced or read as "no field".
+        field_name=row.get("field_name"),
         status=row["status"],
         resolution=None if resolution is None else HumanResolution(
             task_id=resolution["task_id"],
@@ -860,6 +1261,13 @@ def connection_contract_from_item(
     task_rows = tuple(_task_from_row(row) for row in item.tasks)
     tasks = tuple(_task_info(task) for task in task_rows)
     readings = item.ai_readings
+
+    # J66: this connection's citations, and the standing each of its fields derives from
+    # them. Both are read from the snapshot's own recorded rows and neither is computed from
+    # anything else — a revision with no citations yields an empty tuple and SEVEN UNCITED
+    # standings, which is what the live band says too, so the two bands agree by construction
+    # rather than by convention.
+    citations = snapshot.citations_for(item.review_package_id)
 
     # `_finding_info` reads the 7AC tasks (their blocker codes); `_item_summary` reads the
     # contract's own task presentations. Both come from 7AK — one replay helper per use.
@@ -925,6 +1333,8 @@ def connection_contract_from_item(
         generated_files=tuple(state.generated_files),
         last_processed_revision=state.last_processed_revision,
         summary=_item_summary(state, blockers, tasks, requires_action),
+        field_citations=_citation_infos(citations),
+        field_standings=field_standings(citations),
     )
 
 

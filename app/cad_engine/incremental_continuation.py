@@ -350,13 +350,23 @@ def intake_for_accumulated(
     project_id: str | None = None,
     source_drawing_id: str | None = None,
     known_member_marks: Sequence[str] | None = None,
+    page_analysis_run_ids: Mapping[Any, str] | None = None,
 ) -> ProjectExtractionIntake:
     """The accumulated pages through the genuine 7Y intake, carrying the
     accumulated drawing-set page count — the unchanged 7AX entry point.
     Prior pages come first, so submission-order candidate identities
     (RP-0001 ...) are preserved exactly as the combined evidence
     records them. An inconsistent accumulated state is refused before
-    any intake is built."""
+    any intake is built.
+
+    `page_analysis_run_ids` (J72) is keyed by the page's own number — the
+    run that READ that page, so each candidate can record the address it
+    was actually read at. It is keyed by number rather than by position
+    because the accumulated state already refuses a page recorded twice,
+    so a page number names exactly one page here. A page the caller does
+    not name records no origin: the run that stands for the page today is
+    a different question from which attempt produced this candidate, and
+    it is never substituted for one."""
     _validate_accumulated(accumulated)
     return intake_page_extractions(
         accumulated.pages,
@@ -364,4 +374,8 @@ def intake_for_accumulated(
         source_drawing_id=source_drawing_id,
         known_member_marks=known_member_marks,
         drawing_set_page_count=accumulated.drawing_set_page_count,
+        page_analysis_run_ids=(
+            None if page_analysis_run_ids is None
+            else [page_analysis_run_ids.get(_page_number(page)) for page in accumulated.pages]
+        ),
     )
