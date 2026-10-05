@@ -451,12 +451,20 @@ def analysis_runs_for_drawing_set(drawing_set_id: str) -> list[dict]:
 
     E2E-001N. Read-only: nothing here decides what a run's status MEANS, and a caller that
     reads an empty list has learned that no run was recorded, not that one succeeded.
+
+    `started_at` is the run's own creation timestamp and the table's only one. This function
+    named `created_at` until E2E-002D, which `analysis_runs` has never had: PostgREST refused
+    the select with `42703`, and because that refusal is classified as a database error the
+    first genuine E2E extraction reported itself as failing for a reason SteelSpec could not
+    classify. The column names here are asserted against the table's real shape by
+    `tests/test_real_world_e2e002d_analysis_run_columns.py`, which is the check whose absence
+    let an unverified name ship.
     """
     return (
         supabase.table("analysis_runs")
-        .select("id,drawing_set_id,status,created_at")
+        .select("id,drawing_set_id,status,started_at")
         .eq("drawing_set_id", drawing_set_id)
-        .order("created_at")
+        .order("started_at")
         .execute()
         .data
     ) or []
