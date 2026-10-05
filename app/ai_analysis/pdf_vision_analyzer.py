@@ -95,6 +95,15 @@ If this page has no steel member or connection information at all (e.g. it's a c
 """
 
 
+#: How much of an unparseable response is retained for diagnosis. Long enough to show
+#: HOW the JSON broke — a prose preamble, a fence that was not stripped, a tail cut off
+#: mid-object — and short enough that a whole page of the model's output is never
+#: stored. E2E-002L could not tell "the model answered badly" from "the answer did not
+#: fit" because nothing about the response survived the failure; this is the bound on
+#: what survives.
+DIAGNOSTIC_EXCERPT_CHARS = 500
+
+
 @dataclass
 class PageExtraction:
     """Exactly what Claude reported for one page — untouched, unmatched, unvalidated."""
@@ -105,12 +114,34 @@ class PageExtraction:
     raw_members: list[dict] = field(default_factory=list)
     raw_connections: list[dict] = field(default_factory=list)
     parse_failed: bool = False
+    #: The provider's own reason for ending generation, recorded ONLY for a page whose
+    #: response could not be parsed. `max_tokens` here is the whole difference between a
+    #: model that answered badly and an answer that did not fit, and no amount of
+    #: re-reading an empty payload can tell those apart afterwards. It is recorded, never
+    #: interpreted: whatever the provider said is what is kept, including nothing.
+    stop_reason: str | None = None
+    #: The first `DIAGNOSTIC_EXCERPT_CHARS` characters of a response that could not be
+    #: parsed, recorded for the same reason and under the same rule. Diagnosis only: no
+    #: reader may treat it as a reading, and a page carrying one is still `parse_failed`
+    #: with no members, no connections and no engineering data of any kind.
+    raw_response_excerpt: str | None = None
 
 
 def _extract_json(text: str) -> dict:
     """Claude is instructed to return only JSON, but strip code fences defensively in case it adds them."""
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     return json.loads(cleaned)
+
+
+def _stop_reason_of(response) -> str | None:
+    """How the provider says generation ended, or None when it says nothing.
+
+    Read defensively and recorded verbatim. A response that carries no stop reason is
+    not an error — this is diagnosis, so an absent one is stored as absent rather than
+    guessed at or defaulted to a value that would read as a finding.
+    """
+    reason = getattr(response, "stop_reason", None)
+    return reason if isinstance(reason, str) and reason else None
 
 
 def render_pages_to_png(filepath: str, max_pages: int, *, first_page: int = 1) -> list[bytes]:
@@ -211,7 +242,19 @@ def analyze_pdf_pages(
         except (json.JSONDecodeError, AttributeError):
             # A single unparseable page shouldn't kill the whole extraction —
             # record it as failed and keep going with the rest of the set.
-            results.append(PageExtraction(page_number=page_num, parse_failed=True))
+            #
+            # The failure is recorded WITH what the provider said about it and a bounded
+            # prefix of what it said, because those are the only two facts that separate
+            # a model answering badly from an answer that did not fit — and once this
+            # branch was taken, nothing else about the response survived anywhere.
+            # Neither is a reading: the page is still parse_failed, with no members and
+            # no connections, exactly as before.
+            results.append(PageExtraction(
+                page_number=page_num,
+                parse_failed=True,
+                stop_reason=_stop_reason_of(response),
+                raw_response_excerpt=raw_text[:DIAGNOSTIC_EXCERPT_CHARS],
+            ))
             continue
 
         results.append(PageExtraction(

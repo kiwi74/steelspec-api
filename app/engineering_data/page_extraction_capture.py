@@ -106,15 +106,33 @@ def _value(page: Any, name: str, default: Any = None) -> Any:
     return getattr(page, name, default)
 
 
+#: The diagnostics a page carries ONLY when its response could not be parsed
+#: (`app.ai_analysis.pdf_vision_analyzer.PageExtraction`). They record the FAILURE, not
+#: the reading: nothing about a page that parsed is ever described by them.
+FAILURE_DIAGNOSTIC_FIELDS = ("stop_reason", "raw_response_excerpt")
+
+
 def _payload_of(page: Any) -> dict[str, Any]:
     """The reading, verbatim — no field added, dropped, renamed or repaired.
 
     A `PageExtraction` is recorded as `dataclasses.asdict` of itself, which is the
     exact structure the model's response was parsed into; a plain mapping is recorded
     exactly as given, extra keys included.
+
+    ONE exception, and it is not a field of the reading. A failure diagnostic that does
+    not exist is not stored at all, rather than stored as a null. Absence is recorded as
+    absence here for the same reason it is everywhere else in this module — and it is
+    what keeps a reading that has no failure to describe byte-for-byte the reading it
+    has always been, so a stored payload can still be held against a genuine capture
+    file. A diagnostic that DOES exist is kept exactly as it was given, `""` included:
+    an empty response is a finding, and it is not the same as none.
     """
     if dataclasses.is_dataclass(page) and not isinstance(page, type):
-        return dataclasses.asdict(page)
+        payload = dataclasses.asdict(page)
+        for name in FAILURE_DIAGNOSTIC_FIELDS:
+            if payload.get(name) is None:
+                payload.pop(name, None)
+        return payload
     if isinstance(page, Mapping):
         return dict(page)
     raise CaptureRefused(
