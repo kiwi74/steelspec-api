@@ -19,7 +19,6 @@ ordinary, testable Python logic.
 """
 import base64
 import json
-import re
 from dataclasses import dataclass, field
 from io import BytesIO
 
@@ -127,10 +126,118 @@ class PageExtraction:
     raw_response_excerpt: str | None = None
 
 
+#: The five keys a response must carry to be an extraction of a drawing page. An object
+#: without all of them is some other JSON — an example, a fragment, a decoy — and is not
+#: a reading of anything, whatever else it happens to be.
+CONTRACT_KEYS = ("drawing_number", "drawing_title", "revision", "members", "connections")
+
+
+def _complete_json_objects(text: str) -> list[str]:
+    """Every syntactically COMPLETE top-level `{...}` span in `text`, in the order they appear.
+
+    A scanner rather than a search for the first `{` and the last `}`, because those two
+    characters carry no meaning outside the string grammar: they appear inside quoted
+    member marks and detail references, and in the commentary the model writes around its
+    JSON. This walks the text once, tracking brace and bracket nesting, quoted strings,
+    escaped quotes and escaped backslashes — so a brace inside a string is text, and a
+    brace inside an unterminated string is nothing at all.
+
+    Square brackets are tracked for the same reason braces are: an object inside an array
+    is an element of that array, and a response whose answer is `[<contract>]` has not
+    stated a contract at the top level. Counting only braces would have accepted exactly
+    that, since a one-element array holds one object.
+
+    An object that never closes produces NO span, and that is the whole of this module's
+    answer to truncation: nothing here repairs, closes, balances, appends or completes
+    anything, so a response cut off mid-object yields no candidate rather than a
+    plausible-looking one.
+    """
+    spans: list[str] = []
+    depth = 0
+    brackets = 0
+    start: int | None = None
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "[":
+            brackets += 1
+        elif char == "]":
+            if brackets > 0:
+                brackets -= 1
+        elif char == "{":
+            # A candidate starts only outside every other structure. An object inside an
+            # array is an element of that array, not an answer standing on its own.
+            if depth == 0 and brackets == 0:
+                start = index
+            depth += 1
+        elif char == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0:
+                    if start is not None and brackets == 0:
+                        spans.append(text[start:index + 1])
+                    start = None
+    return spans
+
+
 def _extract_json(text: str) -> dict:
-    """Claude is instructed to return only JSON, but strip code fences defensively in case it adds them."""
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
-    return json.loads(cleaned)
+    """The page's extraction, out of whatever else the model wrote around it.
+
+    The model is asked for one JSON object and nothing else, and most of the time that is
+    what comes back — sometimes bare, sometimes in a fenced block, sometimes with a
+    sentence of explanation before or after it. All of those carry exactly one complete
+    object with the extraction contract, and that object is the reading.
+
+    What is NOT accepted is anything less definite than that. An object missing a
+    contract key is not a reading; nor is an arbitrary object that merely parses; nor is
+    a response with several contract-shaped objects in it, where which one is the reading
+    is precisely what is unstated. Each of those raises rather than being resolved by
+    picking one, because a wrongly chosen object is worse than a recorded failure: it
+    attaches one page's reading to another page, or turns an arbitrary payload into a
+    page that apparently held nothing, and neither is visible afterwards.
+
+    A TRUNCATED response is refused for the same reason and by the same rule — it has no
+    COMPLETE contract object, so it has no candidate. Raising the output ceiling is a
+    separate question and this function does not answer it.
+
+    Raises `json.JSONDecodeError`, which is the failure the caller already handles: a
+    refusal here becomes `parse_failed=True` with no members and no connections, exactly
+    as an unparseable response always has.
+    """
+    contracts: list[dict] = []
+    for span in _complete_json_objects(text):
+        try:
+            candidate = json.loads(span)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and all(key in candidate for key in CONTRACT_KEYS):
+            contracts.append(candidate)
+
+    if len(contracts) == 1:
+        return contracts[0]
+    if not contracts:
+        raise json.JSONDecodeError(
+            "the response carries no complete JSON object with the extraction contract; a "
+            "reading is not assembled out of a fragment, an arbitrary object, or a "
+            "response cut off before its object closed",
+            text, 0,
+        )
+    raise json.JSONDecodeError(
+        f"the response carries {len(contracts)} complete JSON objects with the extraction "
+        "contract; which of them is this page's reading is unstated, and one is not "
+        "chosen over the others",
+        text, 0,
+    )
 
 
 def _stop_reason_of(response) -> str | None:
