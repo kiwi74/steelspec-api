@@ -414,7 +414,7 @@ def analyze_pdf_pages(
         b64_image = base64.standard_b64encode(page_bytes).decode("utf-8")
         response = client.messages.create(
             model=PDF_VISION_MODEL,
-            max_tokens=3000,
+            max_tokens=8000,
             system=EXTRACTION_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
