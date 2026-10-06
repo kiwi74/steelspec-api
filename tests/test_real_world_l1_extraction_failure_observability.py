@@ -284,13 +284,15 @@ class TestASuccessfulExtractionIsUnchanged:
         assert page.raw_connections == [{"members": ["B1", "C1"], "type": "bolted"}]
 
     def test_a_successful_page_records_no_failure_diagnostics(self, monkeypatch):
-        """The diagnostics belong to a failure; a success states neither.
+        """The FAILURE diagnostics belong to a failure; a success states neither.
 
-        Asserted as key ABSENCE, which is the strong form: it means a page that parsed
-        stores byte-for-byte what it stored before this change, so the genuine readings
-        already in `page_extraction_captures` keep their exact shape. A stored reading
-        can still be compared against a real capture file — the fidelity assertion in
-        the J23 production-path tests, which this change leaves passing untouched.
+        Asserted as key ABSENCE, which is the strong form: a page that parsed stores no
+        `stop_reason` and no excerpt, so nothing about a failure leaks into a reading.
+
+        L12 adds one key to a successful payload — `response_shape`, which describes what
+        surrounded the object rather than the object — and the exact-key pin below was
+        widened by that one name and nothing else. The claim this test makes is unchanged:
+        the two failure diagnostics are absent from a success.
         """
         pages, _ = _drive(monkeypatch, GOOD_JSON, "max_tokens")
         page = pages[0]
@@ -303,7 +305,7 @@ class TestASuccessfulExtractionIsUnchanged:
         assert "raw_response_excerpt" not in payload
         assert sorted(payload) == [
             "drawing_number", "drawing_title", "page_number", "parse_failed",
-            "raw_connections", "raw_members", "revision",
+            "raw_connections", "raw_members", "response_shape", "revision",
         ]
 
     def test_the_reading_a_successful_page_stores_is_still_the_models_own(self, monkeypatch):

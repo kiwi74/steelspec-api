@@ -124,6 +124,18 @@ class PageExtraction:
     #: reader may treat it as a reading, and a page carrying one is still `parse_failed`
     #: with no members, no connections and no engineering data of any kind.
     raw_response_excerpt: str | None = None
+    #: What the SUCCESSFUL response looked like around the contract object — recorded so
+    #: that a reading which parsed can say whether it parsed trivially or only because the
+    #: surrounding commentary was worked around (L12). Without it a successful extraction
+    #: leaves no trace of the shape it came from, and "the parser recovered this" cannot
+    #: be told from "the provider happened to answer plainly this time".
+    #:
+    #: Diagnosis only, and the strictest case of it: this is a statement ABOUT a response,
+    #: never a statement about a drawing. It is not a contract key, it is never consulted
+    #: by the parser, and no reader may treat it as a reading or as engineering evidence.
+    #: `None` on a page that FAILED — a failure already says everything about its own
+    #: response through `stop_reason` and `raw_response_excerpt`.
+    response_shape: str | None = None
 
 
 #: The five keys a response must carry to be an extraction of a drawing page. An object
@@ -238,6 +250,76 @@ def _extract_json(text: str) -> dict:
         "chosen over the others",
         text, 0,
     )
+
+
+# ======================================================================================
+# L12 — what a response looked like around the object that was read out of it.
+#
+# One vocabulary, so a shape is a fixed word rather than a description somebody invents
+# at the call site. The distinction that matters is NOT cosmetic: the first two shapes
+# parse under the rule this module has always had, and the third does not — it parses
+# only because `_extract_json` now looks for the object rather than demanding the whole
+# response be one. Recording which of them a reading came from is the difference between
+# knowing that the parser recovered something and merely hoping it did.
+# ======================================================================================
+RESPONSE_SHAPE_CLEAN_JSON = "clean_json"
+RESPONSE_SHAPE_FENCED_JSON = "fenced_json"
+RESPONSE_SHAPE_FENCED_JSON_WITH_TRAILING_PROSE = "fenced_json_with_trailing_prose"
+RESPONSE_SHAPE_UNKNOWN = "unknown"
+
+RESPONSE_SHAPES = (
+    RESPONSE_SHAPE_CLEAN_JSON,
+    RESPONSE_SHAPE_FENCED_JSON,
+    RESPONSE_SHAPE_FENCED_JSON_WITH_TRAILING_PROSE,
+    RESPONSE_SHAPE_UNKNOWN,
+)
+
+#: The two fence spellings the module has always tolerated.
+_OPENING_FENCES = ("```", "```json")
+
+
+def _response_shape(text: str) -> str:
+    """What surrounded the contract object in a response that parsed — nothing more.
+
+    Read off the RAW response, before anything is normalised, because the whole point is
+    to describe what the provider sent rather than what this module made of it.
+
+    `fenced_json_with_trailing_prose` is the decisive word: it is the shape `_extract_json`
+    could not read before L8 and can read now, so a reading carrying it is a reading the
+    parser genuinely recovered. `clean_json` and `fenced_json` both parsed under the old
+    rule as well, and a reading carrying either proves nothing about L8 either way.
+
+    Anything outside that vocabulary — prose *before* the object, several objects, an
+    object whose boundaries this function cannot describe — is `unknown`, which is stated
+    rather than guessed at. `unknown` still means "not the plain case", so it carries the
+    same signal as the trailing-prose word without claiming a shape that was not seen.
+    """
+    stripped = text.strip()
+    spans = _complete_json_objects(stripped)
+    if len(spans) != 1:
+        return RESPONSE_SHAPE_UNKNOWN
+
+    span = spans[0]
+    at = stripped.find(span)
+    before = stripped[:at].strip()
+    after = stripped[at + len(span):].strip()
+
+    opening_fence = before in _OPENING_FENCES
+    if before and not opening_fence:
+        # Prose ahead of the object. A real and recoverable shape, but not one of the
+        # four words, so it is not dressed up as one.
+        return RESPONSE_SHAPE_UNKNOWN
+
+    if not after:
+        return RESPONSE_SHAPE_CLEAN_JSON if not before else RESPONSE_SHAPE_FENCED_JSON
+    if after == "```":
+        return RESPONSE_SHAPE_FENCED_JSON
+
+    # Something follows the object. A closing fence may precede it; prose is what matters.
+    trailing = after[len(("```")):].strip() if after.startswith("```") else after
+    if trailing:
+        return RESPONSE_SHAPE_FENCED_JSON_WITH_TRAILING_PROSE
+    return RESPONSE_SHAPE_UNKNOWN
 
 
 def _stop_reason_of(response) -> str | None:
@@ -371,6 +453,10 @@ def analyze_pdf_pages(
             revision=page_data.get("revision"),
             raw_members=page_data.get("members", []),
             raw_connections=page_data.get("connections", []),
+            # L12 — the shape this reading was recovered from, read off the raw response.
+            # Diagnosis only: it is not a contract key, the parser never consults it, and
+            # nothing downstream may read it as engineering evidence.
+            response_shape=_response_shape(raw_text),
         ))
 
     return results

@@ -106,10 +106,18 @@ def _value(page: Any, name: str, default: Any = None) -> Any:
     return getattr(page, name, default)
 
 
-#: The diagnostics a page carries ONLY when its response could not be parsed
-#: (`app.ai_analysis.pdf_vision_analyzer.PageExtraction`). They record the FAILURE, not
-#: the reading: nothing about a page that parsed is ever described by them.
-FAILURE_DIAGNOSTIC_FIELDS = ("stop_reason", "raw_response_excerpt")
+#: The fields a page carries only when there is something about its RESPONSE to say
+#: (`app.ai_analysis.pdf_vision_analyzer.PageExtraction`). They describe an attempt, never
+#: a drawing: `stop_reason` and `raw_response_excerpt` belong to a page that could not be
+#: parsed, and `response_shape` (L12) belongs to one that could — it says what surrounded
+#: the object that was read out of it. None of them is a contract key, and a reader must
+#: never take one for a reading or for engineering evidence.
+#:
+#: Listed here so that an ABSENT one is stored as absent rather than as a null. That is
+#: this module's rule everywhere, and here it also keeps a payload that has no failure to
+#: describe — and nothing to say about the shape it came from — byte-for-byte the payload
+#: it has always been, so a stored reading can still be held against a genuine capture file.
+DIAGNOSTIC_FIELDS = ("stop_reason", "raw_response_excerpt", "response_shape")
 
 
 def _payload_of(page: Any) -> dict[str, Any]:
@@ -129,7 +137,7 @@ def _payload_of(page: Any) -> dict[str, Any]:
     """
     if dataclasses.is_dataclass(page) and not isinstance(page, type):
         payload = dataclasses.asdict(page)
-        for name in FAILURE_DIAGNOSTIC_FIELDS:
+        for name in DIAGNOSTIC_FIELDS:
             if payload.get(name) is None:
                 payload.pop(name, None)
         return payload
