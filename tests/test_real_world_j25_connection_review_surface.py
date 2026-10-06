@@ -338,7 +338,12 @@ class TestTheOwnerSeesTheRealReview:
         assert rows["Drawing"] == j24a.SELBY_DRAWING
         assert rows["Drawing set"] == j24a.SELBY_SET
         assert rows["Document pages"] == str(j24a.SELBY_PAGE_COUNT)
-        assert rows["Reconstruction revision"] == str(review.view.revision) == "0"
+        # L29 — the reconstruction's own revision is always 0 and is no longer printed as a
+        # number, because "0" here invited it to be read as the PERSISTED revision, which is
+        # a different band built from different evidence. The row names the band instead.
+        assert rows["Current reconstruction"] == "from the selected document"
+        assert review.view.revision == 0
+        assert "Reconstruction revision" not in rows
         text = selby.http.get(selby.url()).text
         assert f"Revision {review.view.revision}" in text
 

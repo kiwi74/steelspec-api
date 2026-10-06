@@ -161,6 +161,18 @@ class WorkflowReview:
     recorded_field_readings: tuple[RecordedFieldReading, ...]
     limitations: tuple[tuple[str, str, str], ...]
 
+    #: The analysis runs the RECORDED band's evidence came from, read off the persisted
+    #: snapshot — `()` when nothing is recorded. This is a DIFFERENT identity from
+    #: `capture_runs` below, which names the runs the CURRENT reconstruction read: the two
+    #: describe two bands, and after a lineage is selected they name different lineages.
+    #: Exposed so a client can show which evidence the record holds without confusing it
+    #: with the fresh projection the page is built from. Added in L29; nothing reads it
+    #: for any decision, and it is carried from the snapshot already in hand.
+    #: Defaulted so that every existing construction — including every test double that
+    #: builds this object directly — keeps working unchanged. A composition that does not
+    #: state the recorded runs states none, which is what an unrecorded project has.
+    recorded_evidence_run_ids: tuple[str, ...] = ()
+
 
 # ======================================================================================
 # The injectable seams — each reads something this module must not read at import.
@@ -231,7 +243,12 @@ def _identity_rows(reconstructed: ReconstructedProjectWorkflow, revision) -> tup
         ("Drawing", reconstructed.drawing_id),
         ("Drawing set", reconstructed.drawing_set_id),
         ("Document pages", str(reconstructed.page_count)),
-        ("Reconstruction revision", str(revision)),
+        # L29 — the reconstruction's own revision is ALWAYS 0, because it is a FRESH
+        # reconstruction and not a recorded revision. Printing "0" here invited it to be
+        # read as the persisted revision, which is a different band built from different
+        # evidence. The row names the band it belongs to instead of stating a number
+        # that means nothing outside it.
+        ("Current reconstruction", "from the selected document"),
     )
 
 
@@ -505,6 +522,11 @@ def build_workflow_review(
         refusal_detail=refusal_detail,
         persisted_code=state.code,
         persisted_revisions=tuple(state.revisions),
+        # The persisted band's own evidence, taken from the snapshot `recorded_review_state`
+        # already returned above — no second read, and no derivation from the reconstruction.
+        recorded_evidence_run_ids=(
+            tuple(state.snapshot.evidence_run_ids) if state.snapshot is not None else ()
+        ),
         persisted_view=persisted_view,
         recorded_field_readings=recorded_field_readings,
         limitations=_limitations(view, persisted_view),

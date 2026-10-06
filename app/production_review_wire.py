@@ -212,6 +212,11 @@ def workflow_wire(review, *, documents: Iterable[dict] = ()) -> dict[str, Any]:
         "revision": max(recorded) if recorded else 0,
         "revision_recorded": bool(recorded),
         "recorded_revisions": list(recorded),
+        # L29 — the RECORDED band's evidence runs, next to (never instead of) the
+        # reconstruction's `capture_runs`. Two identities, two bands: `revision` is the
+        # recorded head and `recorded_evidence_run_ids` is what THAT revision was built
+        # from, while `capture_runs` is what the current projection read.
+        "recorded_evidence_run_ids": list(review.recorded_evidence_run_ids),
         "persisted_code": review.persisted_code,
         "refusal_code": review.refusal_code,
         "refusal_detail": review.refusal_detail,
