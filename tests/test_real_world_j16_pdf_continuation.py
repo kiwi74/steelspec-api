@@ -1429,6 +1429,7 @@ class TestScopeAndPurity:
             "20260928000000_j44_project_review_claims.sql",
             "20260929000000_j61_project_documents.sql",
             "20260929010000_j66_field_evidence_citations.sql",
+            "20261006000000_l19_selected_extraction_lineage.sql",
         }
         migrations = sorted(path.name for path in (REPO / "supabase" / "migrations").glob("*.sql"))
         assert migrations == sorted(j13.MIGRATIONS)

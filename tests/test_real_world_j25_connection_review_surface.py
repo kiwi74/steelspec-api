@@ -576,6 +576,11 @@ class TestReadOnly:
             # about what a reading of one found. Named here so the list stays exact: the
             # read surface this milestone renders still cannot resolve anything.
             "/production/review/{project_id}/document-role",
+            # L19: the lineage a document is reviewed from. It records which reading of a
+            # source document is the one to reconstruct from and accepts no decision about a
+            # connection — named here so the list stays exact rather than filtered into
+            # silence: the read surface this milestone renders still cannot resolve.
+            "/production/review/{project_id}/documents/{document_id}/selected-drawing",
             # J50: the baseline-opening operation. It accepts NO decision — an opening
             # request carries no fields at all — and records only the project's own
             # reconstructed revision-0 baseline. Named here so the list stays exact: the

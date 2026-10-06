@@ -146,6 +146,12 @@ from app.production_review_opening import (
     open_project_review,
     parse_opening_request,
 )
+from app.production_document_lineage import (
+    DocumentLineageInputRefused,
+    DocumentLineageRefused,
+    parse_lineage_selection_request,
+    select_document_lineage,
+)
 from app.production_document_role import (
     DocumentRoleInputRefused,
     DocumentRoleRefused,
@@ -1333,3 +1339,62 @@ def production_document_role(
         )
 
     return assertion.to_response()
+
+
+@app.post("/production/review/{project_id}/documents/{document_id}/selected-drawing")
+def production_document_selected_drawing(
+    project_id: str,
+    document_id: str,
+    body: object = Body(default=None),
+    reviewer=Depends(require_reviewer),
+):
+    """Records which ONE extraction lineage a document is reviewed from.
+
+    Milestone L19. The order is the whole of the operation: authenticate, authorize, read
+    the request, then — only for a drawing that is THIS document's, in THIS project, and
+    that carries a persisted reading — write the selection and report what the store says
+    it now holds.
+
+    It is a SELECTION and never an inference. Nothing here reads a timestamp, a run status,
+    a page count, a member count, a model name or any model output, and nothing here chooses
+    between lineages: a caller that names no drawing is refused rather than given one, and a
+    drawing this document does not own is refused rather than substituted. The rule that a
+    document with several readings and no selection refuses to reconstruct is UNCHANGED by
+    this route — this route is how a human answers that refusal, and it is the only way.
+
+    A caller who is not identified (401), does not own the project (403), names a project
+    that is not there (404), sends a body naming no drawing or naming a field this boundary
+    never takes (422), or addresses a document or drawing that is not this project's own, or
+    a drawing that is another document's, or a drawing with no persisted reading (409),
+    reaches no write.
+
+    No review is opened, no revision is recorded, no claim is taken and no artifact is
+    produced. A selection makes a reconstruction possible; it performs none.
+    """
+    # AUTHORIZATION before anything is read, from this request's own credential.
+    _authorized_project(project_id, reviewer)
+
+    try:
+        drawing_id = parse_lineage_selection_request(body)
+    except DocumentLineageInputRefused as refused:
+        raise HTTPException(
+            status_code=422,
+            detail=_route_refusal_detail(refused.code, refused.statement),
+        )
+
+    try:
+        selection = select_document_lineage(
+            project_id=project_id, document_id=document_id, drawing_id=drawing_id,
+        )
+    except DocumentLineageInputRefused as refused:
+        raise HTTPException(
+            status_code=422,
+            detail=_route_refusal_detail(refused.code, refused.statement),
+        )
+    except DocumentLineageRefused as refused:
+        raise HTTPException(
+            status_code=409,
+            detail=_route_refusal_detail(refused.code, refused.statement),
+        )
+
+    return selection

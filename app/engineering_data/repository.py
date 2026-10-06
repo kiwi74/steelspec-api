@@ -411,6 +411,71 @@ def update_document_page_count(document_id: str, page_count: int | None) -> None
     ).execute()
 
 
+def drawing_by_id(drawing_id: str) -> dict | None:
+    """One drawing's own row, or None. A read, and only a read.
+
+    Milestone L19. The lineage a document selects is a DRAWING, so selecting one has to be
+    able to look one up by the id a caller stated. Nothing is inferred from what comes
+    back: the caller compares the row's own `document_id` and its set's `project_id`
+    against the address it was given, and refuses rather than adjusting.
+    """
+    rows = (
+        supabase.table("drawings")
+        .select("id,drawing_set_id,document_id,file_name,page_count,drawing_number,"
+                "drawing_title,revision")
+        .eq("id", drawing_id)
+        .execute()
+        .data
+    ) or []
+    return rows[0] if rows else None
+
+
+def selected_drawing_id_for_document(document_id: str) -> str | None:
+    """The drawing this document has been told to be reviewed from, or None.
+
+    Milestone L19. `None` is the ordinary state and means exactly one thing: no lineage has
+    been selected, so the document behaves as it did before this column existed. It is NOT
+    an invitation to choose — a reader that infers a lineage from it has misread it, and
+    the reconstruction is the reader that must not.
+    """
+    rows = (
+        supabase.table("project_documents")
+        .select("selected_drawing_id")
+        .eq("id", document_id)
+        .execute()
+        .data
+    ) or []
+    return rows[0].get("selected_drawing_id") if rows else None
+
+
+def set_document_selected_drawing(document_id: str, drawing_id: str) -> dict | None:
+    """Records the ONE lineage this document is reviewed from. One column, one row.
+
+    Milestone L19, and the only write a selection has ever had here. It is scoped by the
+    document's own id, so a caller that named the wrong document updates nothing rather
+    than rewriting another document's selection. The database's own guard — added by this
+    milestone's migration — is the last barrier behind the ownership checks the boundary
+    performs, and it stays exactly as declared: a document may name a drawing of ITSELF, in
+    its OWN project, and nothing else.
+
+    Nothing else is written. No drawing, set, run or reading row is touched, no revision is
+    recorded, no review is opened, no claim is taken and no artifact is produced: a
+    selection is a fact about which reading counts, not a new reading.
+
+    Returns the row the store itself reports after the write, or `None` when no document
+    carries that id — so the caller is told what the database did rather than what it was
+    asked to do.
+    """
+    rows = (
+        supabase.table("project_documents")
+        .update({"selected_drawing_id": drawing_id})
+        .eq("id", document_id)
+        .execute()
+        .data
+    ) or []
+    return rows[0] if rows else None
+
+
 # =============================================================================
 # Reads (Milestone J16) — what a continuation must know before it adds to it.
 # =============================================================================

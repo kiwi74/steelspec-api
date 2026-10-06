@@ -357,6 +357,36 @@ def reconstruct_project_workflow(
             if _text(candidate[1].get("document_id")) == document_id
         ]
 
+    # Milestone L19 — the lineage THIS DOCUMENT has been told to be reviewed from, when it
+    # has been told. This is a FILTER on the caller's own statement, exactly as the document
+    # filter above is: it removes a candidate only by an identity a human selected.
+    #
+    # It is not a choice, and it must never become one. Nothing here ranks, dates, counts or
+    # scores the candidates; nothing compares two readings' completeness, recency, run
+    # status or quality; and a selection that names a drawing this document does not have is
+    # REFUSED rather than resolved by falling back to another lineage. The store that
+    # supplies the selection is the production store; an injected one that does not carry
+    # the read is exercising the behaviour that predates the column, which is why its
+    # absence is read as "nothing has been selected" rather than as an error.
+    selected_drawing_id = None
+    read_selection = getattr(project_store, "selected_drawing_id_for_document", None)
+    if callable(read_selection):
+        selected_drawing_id = _text(read_selection(document_id))
+    if selected_drawing_id is not None:
+        selected = [
+            candidate for candidate in documents
+            if _text(candidate[1].get("id")) == selected_drawing_id
+        ]
+        if not selected:
+            raise ReconstructionRefused(
+                RECONSTRUCTION_NO_CAPTURE,
+                f"document {document_id!r} of project {project_id!r} names drawing "
+                f"{selected_drawing_id!r} as the lineage it is reviewed from, and no drawing "
+                "of that document with a persisted AI reading carries that id. The "
+                "selection is authoritative and another lineage is not substituted for it",
+            )
+        documents = selected
+
     if not documents:
         if document_id is not None:
             raise ReconstructionRefused(

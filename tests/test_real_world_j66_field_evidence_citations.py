@@ -554,7 +554,10 @@ def citation_store():
 class TestTheMigrationIsTheOnlyOneAndTripsNoGuard:
     def test_area_1_exactly_one_migration_was_added_and_it_is_this_one(self):
         names = _migration_names()
-        assert names[-1] == MIGRATION_NAME, names
+        # J66's file is no longer the newest — L19 added one after it, as every milestone
+        # after J28 has. What this asserts is unchanged: exactly one migration names this
+        # milestone, and it exists.
+        assert MIGRATION_NAME in names, names
         assert len([name for name in names if "j66" in name.lower()]) == 1
         assert MIGRATION.exists()
 
@@ -569,6 +572,9 @@ class TestTheMigrationIsTheOnlyOneAndTripsNoGuard:
             "20260928000000_j44_project_review_claims.sql",
             "20260929000000_j61_project_documents.sql",
             MIGRATION_NAME,
+            # L19 added one after J66's, which is the same convention: each milestone that
+            # adds a migration names itself here, so a later one cannot appear unremarked.
+            "20261006000000_l19_selected_extraction_lineage.sql",
         ]
 
     def test_area_2_the_filename_names_no_earlier_milestone(self):

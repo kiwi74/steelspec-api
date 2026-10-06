@@ -149,6 +149,7 @@ EXISTING_MIGRATIONS = (
     # reached through the project's own rows — so the authorization relationship this
     # milestone is about is still exactly `projects.user_id`.
     "20260929010000_j66_field_evidence_citations.sql",
+    "20261006000000_l19_selected_extraction_lineage.sql",
 )
 
 

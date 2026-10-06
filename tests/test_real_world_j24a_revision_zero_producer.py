@@ -261,11 +261,16 @@ class _Persisted:
 
     known_projects = ()
 
-    def __init__(self, *, drawing_sets=(), drawings=(), table=None, members=()):
+    def __init__(self, *, drawing_sets=(), drawings=(), table=None, members=(),
+                 selected_drawing_id=None):
         self._drawing_sets = [dict(row) for row in drawing_sets]
         self._drawings = [dict(row) for row in drawings]
         self._table = table
         self._members = dict(members)
+        # L19: what the document has been TOLD to be reviewed from. `None` is the ordinary
+        # state — no lineage selected — and every document behaved that way before the
+        # column existed, so a double that sets none reproduces the pre-L19 behaviour.
+        self._selected_drawing_id = selected_drawing_id
         self.calls: list[tuple[str, object]] = []
 
     # -- the reads a reconstruction makes -----------------------------------
@@ -286,6 +291,15 @@ class _Persisted:
     def page_extraction_captures_for_drawing(self, drawing_id):
         self.calls.append(("page_extraction_captures_for_drawing", drawing_id))
         return self._table.for_drawing(drawing_id) if self._table is not None else []
+
+    def selected_drawing_id_for_document(self, document_id):
+        """L19: the one lineage this document is reviewed from, or None.
+
+        Read, never chosen. A double returns whatever the test stated and the
+        reconstruction filters by it; nothing here ranks, dates or scores a lineage.
+        """
+        self.calls.append(("selected_drawing_id_for_document", document_id))
+        return self._selected_drawing_id
 
     def member_rows_for_project(self, project_id):
         self.calls.append(("member_rows_for_project", project_id))
@@ -311,6 +325,10 @@ ALLOWED_READS = (
     "drawings_for_drawing_set",
     "page_extraction_captures_for_drawing",
     "member_rows_for_project",
+    # L19: the lineage a document has been told to be reviewed from. One read, and the
+    # only one this milestone adds to the reconstruction — it answers "which reading",
+    # never "which reading is best", and `None` is the ordinary unselected state.
+    "selected_drawing_id_for_document",
 )
 FORBIDDEN_READS = (
     "connection_rows_for_project",

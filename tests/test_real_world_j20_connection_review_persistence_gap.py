@@ -744,6 +744,14 @@ FROZEN_ROUTES = (
     # source, opens no review, takes no decision and produces no artifact, so the
     # vocabulary rule below still holds and its path carries none of those ten words.
     (("POST",), "/production/review/{project_id}/document-role"),
+    # L19: the lineage a document is reviewed from. It records WHICH reading of a source
+    # document is the one to reconstruct from — one column of one `project_documents` row,
+    # scoped by the project and document in its path. It accepts no decision about a
+    # connection, opens no review, records no revision, takes no claim and produces no
+    # artifact, so the vocabulary rule below still holds and its path carries none of its
+    # ten words.
+    (("POST",),
+     "/production/review/{project_id}/documents/{document_id}/selected-drawing"),
     # J50: the baseline-opening operation. It records the project's OWN reconstructed
     # revision-0 review baseline and nothing else — no decision, no artifact, no claim, no
     # generation — so the vocabulary rule below still holds and its path carries none of
@@ -919,6 +927,7 @@ class TestNoProductionBindingWasAdded:
             "20260928000000_j44_project_review_claims.sql",
             "20260929000000_j61_project_documents.sql",
             "20260929010000_j66_field_evidence_citations.sql",
+            "20261006000000_l19_selected_extraction_lineage.sql",
         ], migrations
         for name in migrations:
             assert "j20" not in name.lower()

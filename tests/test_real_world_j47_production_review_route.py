@@ -2098,6 +2098,11 @@ class TestTheSource:
             # route's caller cannot aim at anything else: no connection is named, no
             # decision is taken and no artifact is produced.
             "/production/review/{project_id}/open",
+            # L19: the fourth — declared here rather than absorbed. It writes one column of
+            # one source document's row: which extraction lineage that document is reviewed
+            # from. It takes no decision about a connection, opens no review, records no
+            # revision and produces no artifact.
+            "/production/review/{project_id}/documents/{document_id}/selected-drawing",
             # J64: the third, declared here rather than absorbed. It records the role a
             # human asserts for one of the project's OWN source documents — one column of
             # one `project_documents` row, scoped by the project in the path. It accepts
