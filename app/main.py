@@ -74,7 +74,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from app.config import ALLOWED_ORIGINS, SUPABASE_URL
+from app.config import ALLOWED_ORIGINS, REVIEW_UI_ENABLED, SUPABASE_URL
 from app.storage_download import download_from_uploads
 from app.supabase_client import supabase
 from app.drawing_reading.dxf_parser import parse_dxf_and_save
@@ -194,7 +194,18 @@ app.add_middleware(
 # -> pages) and its session layer is a deliberately temporary in-process
 # slice with NO authentication — mounting it here does not make it
 # production-secure public exposure.
-app.mount("/review", review_app)
+#
+# 7K-G: mounting it is now an EXPLICIT opt-in. The six routes below this mount carry no
+# authentication and sit outside the J19 boundary every `/production/review/...` route
+# passes through; they are inert only because nothing in the service ever binds a session
+# to them, which is a property of what is currently called rather than of the routes. So
+# the safe state is made the DEFAULT one — the mount exists only when a deployment sets
+# `REVIEW_UI_ENABLED=true` (see `app/config.py`), and an unmounted path is a 404 that no
+# other configuration can re-expose. `review_app` itself is still constructed and imported
+# unconditionally: the UI's own module-level behaviour and the tests that drive it directly
+# are unchanged, and only its reachability from this application is gated.
+if REVIEW_UI_ENABLED:
+    app.mount("/review", review_app)
 
 
 # ======================================================================================

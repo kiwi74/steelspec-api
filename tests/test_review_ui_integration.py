@@ -88,10 +88,22 @@ def real_app(monkeypatch):
     """The REAL application object (app.main:app), imported under the test
     configuration boundary. Teardown removes everything this import added
     to sys.modules, so the pre-existing smoke-import failures keep failing
-    for exactly the same reason as before 7AO."""
+    for exactly the same reason as before 7AO.
+
+    7K-G: the legacy review UI is mounted only when a deployment explicitly opts in, so
+    this file — which exists to prove the mount — states the opt-in itself, BEFORE
+    `app.main` is imported, because the mount decision is made at import time.
+
+    The eviction below is deliberately left as it was for 7AO: only the modules THIS import
+    added are removed again. Evicting the modules that were already present would look
+    tidier and would break the file — `app.review_ui.session` is imported at module level
+    here and the `sequence` fixture binds the workflow through THAT object, so a second copy
+    of the session module would leave the mounted application reading an unbound session."""
+
     before = set(sys.modules)
     monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", TEST_SERVICE_ROLE_MARKER)
+    monkeypatch.setenv("REVIEW_UI_ENABLED", "true")
     main = importlib.import_module("app.main")
     yield main.app
     for name in set(sys.modules) - before:
@@ -484,6 +496,10 @@ def test_application_imports_and_mounts_in_a_clean_interpreter():
         "import os\n"
         f"os.environ['SUPABASE_URL'] = {TEST_SUPABASE_URL!r}\n"
         f"os.environ['SUPABASE_SERVICE_ROLE_KEY'] = {TEST_SERVICE_ROLE_MARKER!r}\n"
+        # 7K-G — the mount is an explicit opt-in, so the proof that the application
+        # imports AND mounts must state the opt-in; without it this asserts the gate
+        # rather than the mount.
+        "os.environ['REVIEW_UI_ENABLED'] = 'true'\n"
         "from app.main import app\n"
         "paths = {r.path for r in app.routes}\n"
         "assert '/health' in paths\n"

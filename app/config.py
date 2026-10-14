@@ -33,3 +33,23 @@ MAX_PDF_PAGES = int(os.environ.get("MAX_PDF_PAGES", "30"))
 # import. `app.production_fabrication_artifact` validates it (absolute,
 # creatable, writable) before use.
 ARTIFACT_WORKING_DIR = os.environ.get("ARTIFACT_WORKING_DIR")
+
+# 7K-G — the legacy 7AN review UI (`app/review_ui`) is NOT mounted unless a deployment
+# explicitly asks for it.
+#
+# That sub-application is a deliberately temporary in-process slice with NO authentication
+# (see `app/review_ui/session.py`), and its six routes sit outside the J19 boundary that
+# every `/production/review/...` route passes through. It is inert only because nothing in
+# the service ever binds a session to it — a property of what is currently called, not of
+# the routes. Requiring an explicit opt-in makes the SAFE state the default one: an
+# unmounted path is a 404 no configuration can accidentally re-expose.
+#
+# STRICT, and deliberately so. Only the documented value `true` enables it, compared
+# case-insensitively after stripping whitespace. Absent, empty, "1", "yes", "on", "false"
+# and every other value leave it disabled. A permissive truthiness test (`if value:`) would
+# enable the surface on "0", "no" and "false" — exactly the mistake a fail-closed gate
+# exists to prevent.
+REVIEW_UI_ENABLED_VALUE = "true"
+REVIEW_UI_ENABLED = (
+    os.environ.get("REVIEW_UI_ENABLED", "").strip().lower() == REVIEW_UI_ENABLED_VALUE
+)
