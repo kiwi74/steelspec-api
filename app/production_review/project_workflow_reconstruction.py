@@ -368,10 +368,21 @@ def reconstruct_project_workflow(
     # supplies the selection is the production store; an injected one that does not carry
     # the read is exercising the behaviour that predates the column, which is why its
     # absence is read as "nothing has been selected" rather than as an error.
+    #
+    # THE READ IS MADE ONLY WHEN THERE IS A DOCUMENT TO MAKE IT FOR. The selection is a
+    # column OF a document, so it is addressed by that document's id and there is nothing to
+    # look up when the caller named none. Asking anyway is not a harmless empty answer: the
+    # production store sends the id as a filter value, and `None` is not a uuid, so the query
+    # fails as a malformed-input fault rather than returning "nothing has been selected". That
+    # fault would surface in place of the refusal this path is supposed to make — a project
+    # with more than one readable document is REFUSED as ambiguous below, and the caller must
+    # be told that, not told that a query was malformed. `None` therefore keeps the pre-L19
+    # meaning it always had: no selection was consulted, because no document was named.
     selected_drawing_id = None
-    read_selection = getattr(project_store, "selected_drawing_id_for_document", None)
-    if callable(read_selection):
-        selected_drawing_id = _text(read_selection(document_id))
+    if document_id is not None:
+        read_selection = getattr(project_store, "selected_drawing_id_for_document", None)
+        if callable(read_selection):
+            selected_drawing_id = _text(read_selection(document_id))
     if selected_drawing_id is not None:
         selected = [
             candidate for candidate in documents

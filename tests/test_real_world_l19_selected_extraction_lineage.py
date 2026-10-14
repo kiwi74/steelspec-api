@@ -297,6 +297,40 @@ class TestTheReconstructionHonoursTheSelection:
             self._reconstruct(store)
         assert refused.value.code == j24a.producer.RECONSTRUCTION_AMBIGUOUS_DOCUMENT
 
+    def test_an_unscoped_reconstruction_never_consults_the_selection_read(self):
+        """A reconstruction that names NO document has no document whose selection could be
+        read, and must not ask for one.
+
+        The default review request is exactly this one. The selection is a column OF a
+        document, so the store addresses it with the document's id as a filter value — and
+        `None` is not a uuid. Asking anyway is not a harmless empty answer: it is a
+        malformed-input fault raised in place of the answer this path owes its caller, so a
+        project whose review could not be reconstructed would be reported as a broken query
+        instead of as the refusal it is.
+
+        Asserted over the store's own call log rather than over the outcome, because BOTH
+        implementations reconstruct successfully here — the difference is the read that was
+        made to get there.
+        """
+        store = self._selby(selected=j24a.SELBY_DRAWING)
+        result = j24a.producer.reconstruct_project_workflow(
+            j24a.SELBY_PROJECT, section_matcher=j24a._StubMatcher(),
+            repository=store, document_id=None,
+        )
+        assert result is not None
+        assert [call for call in store.calls
+                if call[0] == "selected_drawing_id_for_document"] == []
+
+    def test_a_scoped_reconstruction_still_consults_the_selection_read(self):
+        """The read is SKIPPED when there is no document, never removed: a caller that named
+        one still has its selection honoured, which is what L19 exists to prove."""
+        store = self._selby(selected=j24a.SELBY_DRAWING)
+        j24a.producer.reconstruct_project_workflow(
+            j24a.SELBY_PROJECT, section_matcher=j24a._StubMatcher(),
+            repository=store, document_id=self.DOCUMENT,
+        )
+        assert ("selected_drawing_id_for_document", self.DOCUMENT) in store.calls
+
     def test_the_read_the_selection_needs_is_in_the_reconstruction_read_contract(self):
         assert "selected_drawing_id_for_document" in j24a.ALLOWED_READS
 
